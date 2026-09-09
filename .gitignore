@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 환경변수 (API 키 등 민감정보)
+.env
+.env.local
+*.env
+
+# uv 관련 (uv.lock은 보통 커밋함, 캐시만 제외)
+.uv-cache/
+
+# OS / 에디터
+.DS_Store
+.vscode/
+*.swp
+
+.docs/

@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --font-sans: 'Noto Sans KR', system-ui, sans-serif;
+  --color-brand: #FF6F0F;
+  --color-brand-light: #FFF3EC;
+  --color-brand-dark: #E05500;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Noto Sans KR', system-ui, sans-serif;
+}
+
+body {
+  background: #F5F5F5;
+  color: #1A1A1A;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mobile max-width container */
+.mobile-container {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100%;
+  background: #fff;
+  position: relative;
+}
+
+/* Safe area header: pushes content below status bar / notch / Dynamic Island */
+.safe-header {
+  padding-top: max(env(safe-area-inset-top), 52px);
+}
+
+/* Hide scrollbar but keep scroll */
+::-webkit-scrollbar { display: none; }
+* { scrollbar-width: none; }
