@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getPhoto, setPhoto, clearPhoto, transformPhoto } from '../features/upload';
+import { api, newKey, ApiError } from '../api/client';
 
 type Rotation = 0 | 90 | 180 | 270;
 
@@ -13,17 +15,13 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const url = sessionStorage.getItem('preview_url');
-    const name = sessionStorage.getItem('preview_name') ?? '';
-    if (!url) {
+    const { file, url } = getPhoto();
+    if (!file || !url) {
       navigate('/', { replace: true });
       return;
     }
     setPreviewUrl(url);
-    setFilename(name);
-    return () => {
-      // cleanup is deferred to navigation
-    };
+    setFilename(file.name);
   }, [navigate]);
 
   function rotate() {
@@ -32,34 +30,33 @@ export default function UploadPage() {
 
   function handleReselect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setError(null);
-    if (file.size > 3 * 1024 * 1024) {
-      setError('파일 크기가 3MB를 초과해요. 더 작은 사진을 선택해 주세요.');
-      return;
+    try {
+      const url = setPhoto(file);
+      setPreviewUrl(url);
+      setFilename(file.name);
+      setRotation(0);
+    } catch (err) {
+      setError((err as Error).message);
     }
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      setError('JPEG 또는 PNG 파일만 지원해요.');
-      return;
-    }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const url = URL.createObjectURL(file);
-    sessionStorage.setItem('preview_url', url);
-    sessionStorage.setItem('preview_name', file.name);
-    setPreviewUrl(url);
-    setFilename(file.name);
-    setRotation(0);
   }
 
-  function handleAnalyze() {
+  async function handleAnalyze() {
+    if (submitting) return;
     setSubmitting(true);
-    // Mock: navigate to analysis page after short delay
-    setTimeout(() => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      sessionStorage.removeItem('preview_url');
-      sessionStorage.removeItem('preview_name');
-      navigate('/analyses/mock-001', { replace: true });
-    }, 800);
+    setError(null);
+    try {
+      // Region selection is not implemented yet; the full rotated image is analyzed as-is.
+      const blob = await transformPhoto(rotation, [0, 0, 100, 100]);
+      const accepted = await api.create(blob, newKey());
+      clearPhoto();
+      navigate(`/analyses/${accepted.analysis_id}`, { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : (err as Error).message);
+      setSubmitting(false);
+    }
   }
 
   const rotateStyle: React.CSSProperties = {
