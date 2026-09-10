@@ -123,3 +123,17 @@ def test_chunk_document_used_by_retriever_matches_chunking_module():
     retriever = Retriever([doc], chunk_size=256)
     expected = chunk_document(doc, chunk_size=256)
     assert [c.chunk_id for c in retriever.chunks] == [c.chunk_id for c in expected]
+
+
+def test_named_target_and_followup_memory():
+    from backend.provider import resolve_targets
+    ramen = MenuItem(original_name='味噌ラーメン', translated_name='미소 라멘')
+    chicken = MenuItem(original_name='焼き鳥', translated_name='야키토리')
+    analysis = Analysis(mode='openai', items=[ramen, chicken])
+    assert resolve_targets(analysis, ChatMessage(role='user', content='미소 라멘은 어떻게 조리해?')) == [ramen.item_id]
+    analysis.messages.append(ChatMessage(role='assistant', content='설명', referenced_item_ids=[ramen.item_id]))
+    assert resolve_targets(analysis, ChatMessage(role='user', content='그 음식은 매워?')) == [ramen.item_id]
+    assert resolve_targets(analysis, ChatMessage(role='user', content='야키토리는?')) == [chicken.item_id]
+    assert resolve_targets(analysis, ChatMessage(role='user', content='다른 요리 알려줘')) == []
+    analysis.messages.append(ChatMessage(role='assistant', content='비교', referenced_item_ids=[ramen.item_id, chicken.item_id]))
+    assert resolve_targets(analysis, ChatMessage(role='user', content='그거는?')) == []

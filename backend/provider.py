@@ -148,6 +148,33 @@ def _looks_like_image(url: str) -> bool:
         return False
 
 
+def resolve_targets(analysis, message):
+    """Resolve explicit names first, then unambiguous conversational references."""
+    import re
+    import unicodedata
+    def normalize(value):
+        return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value).casefold())
+    valid = {item.item_id for item in analysis.items}
+    if message.referenced_item_ids:
+        return [item_id for item_id in message.referenced_item_ids if item_id in valid]
+    content = normalize(message.content)
+    matches = [item.item_id for item in analysis.items
+               if any(normalize(name) and normalize(name) in content
+                      for name in (item.original_name, item.translated_name))]
+    if matches:
+        return matches
+    if len(analysis.items) == 1:
+        return [analysis.items[0].item_id]
+    if any(word in content for word in ('그거', '그음식', '그메뉴', '그것', '아까', 'it', 'that')):
+        for previous in reversed(analysis.messages):
+            if previous.message_id == message.message_id or previous.status != 'done':
+                continue
+            targets = [item_id for item_id in previous.referenced_item_ids if item_id in valid]
+            if targets:
+                return targets if len(targets) == 1 else []
+    return []
+
+
 class OpenAIProvider:
     def __init__(self, settings, retriever: Retriever | None = None):
         self.settings = settings
@@ -244,14 +271,9 @@ class OpenAIProvider:
             item.warnings.append('참고 사진을 찾지 못했어요.')
 
     def answer(self, analysis, message, charge) -> ChatMessage:
-        if not message.referenced_item_ids and len(analysis.items) > 1:
-            # 대상이 모호하면 추측하지 않고 되묻는다 (LLM 호출 없이, 계획서 7절)
-            return ChatMessage(
-                role='assistant',
-                content='어떤 음식을 말씀하시는지 메뉴 이름을 알려 주세요.',
-                referenced_item_ids=[],
-            )
-        target_ids = message.referenced_item_ids or ([analysis.items[0].item_id] if analysis.items else [])
+        target_ids = resolve_targets(analysis, message)
+        if not target_ids:
+            return ChatMessage(role='assistant', content='어떤 음식을 말씀하시는지 메뉴 이름을 알려 주세요.')
         items = [i for i in analysis.items if i.item_id in target_ids]
         item_names = ' '.join(f'{i.translated_name} {i.original_name}' for i in items)
         query = f'{message.content} {item_names}'.strip()
