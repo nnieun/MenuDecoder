@@ -14,7 +14,8 @@ from backend.provider import (
     _citation,
     _citations_from,
     _context_block,
-    _looks_like_image,
+    _public_url,
+    image_candidates,
 )
 from backend.rag.chunking import chunk_document
 from backend.rag.models import Document, Section, now
@@ -73,15 +74,23 @@ def test_context_block_empty_when_no_chunks():
     assert '관련 문서를 찾지 못했' in _context_block([], retriever)
 
 
-def test_looks_like_image_rejects_non_http_scheme():
-    assert _looks_like_image('ftp://example.com/pic.jpg') is False
+def test_image_url_validation_does_not_fetch():
+    for url in ['ftp://example.com/a', 'http://example.com/a', 'https://127.0.0.1/a', 'https://localhost/a', 'https://[::1]/a', 'https://169.254.169.254/a', 'https://user:pass@example.com/a']:
+        assert not _public_url(url)
+    assert _public_url('https://example.com/photo.jpg')
 
 
-def test_looks_like_image_false_on_network_error():
-    import httpx
-    with patch('backend.provider.httpx.Client') as client_cls:
-        client_cls.return_value.__enter__.side_effect = httpx.ConnectError('boom')
-        assert _looks_like_image('https://example.com/pic.jpg') is False
+def test_image_urls_come_only_from_search_tool_results():
+    from unittest.mock import Mock
+    response = Mock()
+    good = {'type': 'image_result', 'image_url': 'https://example.com/image.png', 'source_website_url': 'https://example.com/food', 'caption': 'Ramen'}
+    response.model_dump.return_value = {'output': [
+        {'type': 'message', 'results': [good]},
+        {'type': 'web_search_call', 'status': 'completed', 'results': [good, good, dict(good, image_url='https://127.0.0.1/private')]},
+    ]}
+    candidates = image_candidates(response)
+    assert len(candidates) == 1
+    assert str(candidates[0].source_page_url) == 'https://example.com/food'
 
 
 def test_answer_disambiguates_without_calling_the_model():
