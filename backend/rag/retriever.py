@@ -9,6 +9,7 @@
 최소 구현이다.
 """
 import re
+import unicodedata
 from functools import lru_cache
 
 from rank_bm25 import BM25Okapi
@@ -20,11 +21,42 @@ from .stats import load_documents
 DEFAULT_CHUNK_SIZE = 512  # menu_project_plan.md 4절의 초기 기준값 제안
 DEFAULT_TOP_K = 5
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+# Query expansion v1 for the English corpus; original source text stays intact.
+ALIASES = {
+    'ramen': ('라멘', '라면', 'ラーメン', 'らーめん'),
+    'yakitori': ('야키토리', '焼き鳥', '焼鳥'),
+    'sushi': ('스시', '초밥', '寿司', '鮨', 'すし'),
+    'sashimi': ('사시미', '생선회', '刺身', '刺し身'),
+    'tempura': ('덴푸라', '텐푸라', '天ぷら', '天麩羅'),
+    'izakaya': ('이자카야', '居酒屋'),
+    'miso': ('미소', '된장', '味噌', 'みそ'),
+    'soy sauce': ('간장', '쇼유', '醤油', 'しょうゆ'),
+    'pork': ('돼지고기', '豚肉'),
+    'chicken': ('닭고기', '鶏肉'),
+    'broth': ('육수', '국물', '出汁', 'だし'),
+}
+
+@lru_cache(maxsize=1)
+def _japanese_tokenizer():
+    from sudachipy import dictionary
+    return dictionary.Dictionary().create()
+
 
 
 def _tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+    normalized = unicodedata.normalize('NFKC', text).lower()
+    expanded = []
+    for english, aliases in ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            expanded.extend(english.split())
+    tokens = []
+    for word in _TOKEN_RE.findall(normalized):
+        if re.search(r'[\u3040-\u30ff\u3400-\u9fff]', word):
+            tokens.extend(m.normalized_form().lower() for m in _japanese_tokenizer().tokenize(word))
+        else:
+            tokens.append(word)
+    return tokens + expanded
 
 
 class Retriever:
