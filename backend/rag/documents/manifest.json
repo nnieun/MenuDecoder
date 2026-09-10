@@ -1,0 +1,71 @@
+{
+  "documents": [
+    {
+      "source_id": "jnto-sushi",
+      "title": "Sushi in Japan Guide",
+      "doc_type": "html",
+      "url": "https://www.japan.travel/en/guide/sushi-in-japan/",
+      "language": "en",
+      "publisher": "Japan National Tourism Organization (JNTO)",
+      "collected_at": "2026-09-10T11:11:35.367526+00:00",
+      "content_hash": "be524089fb5182496f495fe8a5b45cd3055c640b497004c08ae48ceb631f40b5",
+      "section_count": 7
+    },
+    {
+      "source_id": "jnto-ramen",
+      "title": "A Guide to Ramen in Japan",
+      "doc_type": "html",
+      "url": "https://www.japan.travel/en/guide/a-guide-to-ramen-in-japan/",
+      "language": "en",
+      "publisher": "Japan National Tourism Organization (JNTO)",
+      "collected_at": "2026-09-10T11:11:35.739992+00:00",
+      "content_hash": "d1f8124aaab0d1b0465d0db29924e78a366101d23d3efaf017b80ed940b5f626",
+      "section_count": 5
+    },
+    {
+      "source_id": "jnto-yakitori",
+      "title": "Yakitori",
+      "doc_type": "html",
+      "url": "https://www.japan.travel/en/guide/yakitori-a-guide-to-chicken-skewers/",
+      "language": "en",
+      "publisher": "Japan National Tourism Organization (JNTO)",
+      "collected_at": "2026-09-10T11:11:36.089614+00:00",
+      "content_hash": "2447b143d4952bf4e2e28e8aed52961d2f2f3f9240754f6f40733b1eb66e64d1",
+      "section_count": 5
+    },
+    {
+      "source_id": "jnto-etiquette",
+      "title": "Japanese Food Etiquette Guide",
+      "doc_type": "html",
+      "url": "https://www.japan.travel/en/guide/japanese-food-etiquette/",
+      "language": "en",
+      "publisher": "Japan National Tourism Organization (JNTO)",
+      "collected_at": "2026-09-10T11:11:36.389407+00:00",
+      "content_hash": "0fccd343c78c0625a970d4ab20898897bbc8189f94eb0127b8a7027993388f3c",
+      "section_count": 8
+    },
+    {
+      "source_id": "jnto-izakaya",
+      "title": "Izakaya Dining Guide",
+      "doc_type": "html",
+      "url": "https://www.japan.travel/en/guide/dinner-at-a-japanese-tavern/",
+      "language": "en",
+      "publisher": "Japan National Tourism Organization (JNTO)",
+      "collected_at": "2026-09-10T11:11:36.684561+00:00",
+      "content_hash": "996c71c5ffbe0dcd44ffc3e2a51708e8ba8a0747cefdea0d95c309e6ba1bbb07",
+      "section_count": 5
+    },
+    {
+      "source_id": "maff-washoku",
+      "title": "WASHOKU: Traditional Dietary Cultures of the Japanese",
+      "doc_type": "pdf",
+      "url": "https://www.maff.go.jp/e/data/publish/attach/pdf/index-20.pdf",
+      "language": "en",
+      "publisher": "일본 농림수산성 (MAFF)",
+      "collected_at": "2026-09-10T11:11:40.624354+00:00",
+      "content_hash": "08b128da7bd239dad372337d525e20d7c47a3b22333ddde1e70bf891433cd952",
+      "section_count": 34
+    }
+  ],
+  "failures": []
+}
