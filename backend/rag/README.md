@@ -98,8 +98,22 @@ Chroma·검색은 아직 포함하지 않는다 — 문서 수집·전처리·�
   Japan Guide ..."). 검색·청킹 동작에는 영향이 없으나 출처 표시용으로는
   다듬을 여지가 있다.
 
+## retriever.py — BM25 검색 (단계 5의 일부)
+
+`retriever.py`는 이 폴더가 만든 청크 위에 `rank_bm25`로 BM25 검색만
+붙인다. `backend/provider.py`(OpenAIProvider)의 `describe()`/`answer()`가
+이 `Retriever.search()` 결과를 근거로 실제 OpenAI 호출의 프롬프트를
+구성하고, 모델이 인용한 chunk_id를 이 결과 집합과 대조해 존재하지 않는
+근거는 표시 전에 버린다. 기본 청크 크기는 계획서 4절의 초기 제안값인
+512 토큰(`DEFAULT_CHUNK_SIZE`)을 그대로 썼다 — 최적값이라는 근거는 아직
+없다.
+
 ## 다음 단계 (아직 미구현)
 
-임베딩(OpenAI `text-embedding-3-small` 대 `BAAI/bge-m3`) → Chroma 색인
-→ BM25 → Hybrid(RRF) → Reranking → 프롬프트 구성·생성 연결. 이 폴더는
-그 전 단계(문서·청크)만 제공한다.
+임베딩(OpenAI `text-embedding-3-small` 대 `BAAI/bge-m3`) 비교 → Chroma
+색인 → Hybrid(BM25+dense, RRF) → Reranking. 지금은 BM25 단독으로만
+검색하며, 이는 "먼저 검색만 평가해 비용을 줄인다"는 계획서 8절의 순서를
+따른 의도적 축소이지 최종 설계가 아니다. `backend/provider.py`가
+extract·describe·images·answer를 실제 OpenAI 호출로 구현했지만
+(`backend/manual_openai_smoke.py` 참고), 이는 실제 API 연결을 검증한
+것이지 필수 비교 실험(EX-01~EX-08)을 수행한 것은 아니다.
