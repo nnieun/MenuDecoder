@@ -28,6 +28,14 @@ from .config import Settings
 from .models import Analysis, ChatMessage
 from .provider import OpenAIProvider
 
+# Windows consoles default stdout/stderr to the system codepage (cp949 on
+# this machine), which can't encode Japanese/emoji output and crashes with
+# UnicodeEncodeError. Force UTF-8 so this script's Japanese menu text and
+# Korean output print instead of killing the run mid-way through paid calls.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 FONT_PATH = r'C:\Windows\Fonts\msgothic.ttc'
 
 
