@@ -214,8 +214,19 @@ class OpenAIProvider:
     @property
     def retriever(self) -> Retriever:
         if self._retriever is None:
-            self._retriever = default_retriever()
+            if self.settings.retrieval_mode == 'bm25':
+                self._retriever = default_retriever()
+            else:
+                from .rag.vector import VectorRetriever
+                from .rag.stats import load_documents
+                self._retriever = VectorRetriever(load_documents(), self.settings, self.settings.chunk_size)
         return self._retriever
+
+    def retrieve(self, query, charge):
+        from .rag.vector import VectorRetriever
+        if isinstance(self.retriever, VectorRetriever):
+            return self.retriever.search(query, self.settings.top_k, charge=charge)
+        return self.retriever.search(query, self.settings.top_k)
 
     def extract(self, image: bytes, mime: str, charge) -> list[MenuItem]:
         charge()
@@ -246,7 +257,7 @@ class OpenAIProvider:
 
     def describe(self, item: MenuItem, charge):
         query = f'{item.translated_name} {item.original_name}'.strip()
-        chunks = self.retriever.search(query)
+        chunks = self.retrieve(query, charge)
         charge()
         response = self.client.responses.parse(
             model=self.model, store=False, max_output_tokens=4000,
@@ -308,7 +319,7 @@ class OpenAIProvider:
         items = [i for i in analysis.items if i.item_id in target_ids]
         item_names = ' '.join(f'{i.translated_name} {i.original_name}' for i in items)
         query = f'{message.content} {item_names}'.strip()
-        chunks = self.retriever.search(query)
+        chunks = self.retrieve(query, charge)
 
         recent = analysis.messages[-6:]
         history = '\n'.join(f'{"사용자" if m.role == "user" else "도우미"}: {m.content}' for m in recent if m.status == 'done')

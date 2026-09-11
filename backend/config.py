@@ -27,3 +27,10 @@ class Settings(BaseSettings):
     collection_name: str = 'food-openai-512'
     langfuse_enabled: bool = False
 
+
+    retrieval_mode: Literal['bm25', 'similarity', 'mmr', 'hybrid'] = 'bm25'
+    reranker: Literal['none', 'bge'] = 'none'
+    chunk_size: Literal[256, 512, 1024] = 512
+    top_k: Literal[3, 5, 10] = 5
+    bge_revision: str = 'main'
+    reranker_revision: str = 'main'
