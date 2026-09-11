@@ -34,3 +34,6 @@ class Settings(BaseSettings):
     top_k: Literal[3, 5, 10] = 5
     bge_revision: str = 'main'
     reranker_revision: str = 'main'
+    langfuse_public_key: str = ''
+    langfuse_secret_key: str = ''
+    langfuse_base_url: str = 'https://cloud.langfuse.com'

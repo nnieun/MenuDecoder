@@ -1,4 +1,6 @@
 from typing import TypedDict
+from contextvars import ContextVar
+from .observability import Telemetry
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
@@ -12,25 +14,51 @@ class StepState(TypedDict):
     version: int
 
 
+_active_session = ContextVar('active_session')
+
+
 class Engine:
     def __init__(self, store, provider):
         self.store, self.provider = store, provider
         self.checkpointer = InMemorySaver()
+        self.telemetry = getattr(provider, "telemetry", Telemetry(store.settings))
         builder = StateGraph(StepState)
         # User content stays in the session store. Checkpoints contain metadata only.
         def advance(state, config):
-            session = config['configurable']['session']
+            session = _active_session.get()
             self.step(session)
             return {'stage': session.analysis.status, 'version': session.analysis.state_version}
-        builder.add_node('advance', advance)
-        builder.add_edge(START, 'advance')
-        builder.add_edge('advance', END)
+        stages = ['reading', 'describing', 'images', 'answering', 'review']
+        def route(state):
+            session = _active_session.get()
+            analysis = session.analysis
+            if analysis.status in ('queued', 'reading'):
+                return 'reading'
+            item = next((i for i in analysis.items if i.status in ('pending', 'reanalyzing', 'searching_docs', 'searching_images')), None)
+            if item:
+                return 'images' if item.status == 'searching_images' else 'describing'
+            return 'answering' if any(m.status == 'sending' for m in analysis.messages) else 'review'
+        for stage in stages:
+            builder.add_node(stage, advance)
+            builder.add_edge(stage, END)
+        builder.add_conditional_edges(START, route, {stage: stage for stage in stages})
         self.graph = builder.compile(checkpointer=self.checkpointer)
         store.on_delete = self.checkpointer.delete_thread
 
     def run(self, session):
-        self.graph.invoke({'stage': session.analysis.status, 'version': session.analysis.state_version},
-                          {'configurable': {'thread_id': str(session.analysis.analysis_id), 'session': session}})
+        token = _active_session.set(session)
+        thread_id = str(session.analysis.analysis_id)
+        try:
+            with self.telemetry.span('analysis.step', {'analysis_id': thread_id, 'state_version': session.analysis.state_version,
+                                                      'stage': session.analysis.status, 'calls': session.calls}):
+                self.graph.invoke({'stage': session.analysis.status, 'version': session.analysis.state_version},
+                                  {'configurable': {'thread_id': thread_id}})
+        finally:
+            _active_session.reset(token)
+            # A step may finish after deletion. Remove its newly written checkpoint.
+            if session.deleted:
+                self.checkpointer.delete_thread(thread_id)
+            self.telemetry.flush()
 
     def step(self, session):
         a = session.analysis
