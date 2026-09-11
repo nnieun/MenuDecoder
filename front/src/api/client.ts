@@ -36,18 +36,34 @@ const root = (id: string) => `/api/v1/analyses/${encodeURIComponent(id)}`;
 function post<T>(id: string, path: string, body: unknown, key: string, method = 'POST') {
   return request<T>(root(id) + path, { method, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify(body) }, id);
 }
+const pendingMutations = new Map<string, string>();
+async function retryableMutation<T>(identity: string, action: (key: string) => Promise<T>) {
+  const key = pendingMutations.get(identity) || newKey();
+  pendingMutations.set(identity, key);
+  try {
+    const result = await action(key);
+    pendingMutations.delete(identity);
+    return result;
+  } catch (error) {
+    // A definitive client rejection can be corrected; network/server failures
+    // may have committed already and must keep the original operation key.
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) pendingMutations.delete(identity);
+    throw error;
+  }
+}
 export const api = {
   health: () => request<components['schemas']['Health']>('/health'),
-  async create(file: Blob, key: string) {
+  async create(file: Blob, _key: string) {
     const data = new FormData(); data.set('photo', file, 'menu.png'); data.set('output_language', 'ko');
-    const accepted = await request<Accepted>('/api/v1/analyses', { method: 'POST', body: data, headers: { 'Idempotency-Key': key } });
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), n => n.toString(16).padStart(2, '0')).join('');
+    const accepted = await retryableMutation('upload:' + hash, stableKey => request<Accepted>('/api/v1/analyses', { method: 'POST', body: data, headers: { 'Idempotency-Key': stableKey } }));
     sessionStorage.setItem(storageKey, JSON.stringify(accepted));
     return accepted;
   },
   get: (id: string) => request<Analysis>(root(id), {}, id),
   advance: (id: string, version: number, key: string) => post<Analysis>(id, '/continue', { state_version: version }, key),
-  message: (id: string, content: string, key: string) => post<Analysis>(id, '/messages', { content }, key),
-  edit: (id: string, item: MenuItem, original_name: string, key: string) => post<Analysis>(id, `/items/${item.item_id}`, { original_name, item_version: item.item_version }, key, 'PATCH'),
+  message: (id: string, content: string, _key: string) => retryableMutation(JSON.stringify([id, 'message', content]), key => post<Analysis>(id, '/messages', { content }, key)),
+  edit: (id: string, item: MenuItem, original_name: string, _key: string) => retryableMutation(JSON.stringify([id, item.item_id, item.item_version, original_name]), key => post<Analysis>(id, `/items/${item.item_id}`, { original_name, item_version: item.item_version }, key, 'PATCH')),
   delete: (id: string) => request<void>(root(id), { method: 'DELETE' }, id),
 };
 // Shared single flight across React remounts; only the first subscriber sends a step.

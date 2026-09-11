@@ -337,9 +337,17 @@ export default function AnalysisPage() {
 
   async function handleEditSave(item: MenuItem, newName: string) {
     if (!analysisId) return;
-    const updated = await api.edit(analysisId, item, newName, newKey());
-    accept(updated);
-    refresh();
+    try {
+      const updated = await api.edit(analysisId, item, newName, newKey());
+      accept(updated); refresh();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const latest = await api.get(analysisId); accept(latest);
+        const current = (latest.items ?? []).find(i => i.item_id === item.item_id);
+        if (current) setEditItem({ ...current, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
+      }
+      throw err;
+    }
   }
 
   async function handleDelete() {
@@ -357,7 +365,7 @@ export default function AnalysisPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void handleSendMessage();
     }
@@ -395,7 +403,7 @@ export default function AnalysisPage() {
     );
   }
 
-  const displayStatus: DisplayStatus = errorStatus === 401 ? 'session_expired' : analysis.status;
+  const displayStatus: DisplayStatus = errorStatus === 401 || errorStatus === 404 ? 'session_expired' : analysis.status;
 
   return (
     <div className="mobile-container flex flex-col" style={{ height: '100dvh' }}>
@@ -424,6 +432,10 @@ export default function AnalysisPage() {
         </button>
       </header>
 
+      {error && <div role="alert" className="px-4 py-3 bg-red-50 text-sm text-red-700">
+        <p>{error}</p>
+        {errorStatus !== 401 && errorStatus !== 404 && <button onClick={refresh} className="underline mt-2">최신 상태 확인 후 계속하기</button>}
+      </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
         {analysis.mode === 'mock' && (
