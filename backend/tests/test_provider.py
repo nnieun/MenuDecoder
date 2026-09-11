@@ -118,7 +118,7 @@ def test_answer_defaults_to_single_item_without_asking():
         result = provider.answer(analysis, message, charge=lambda: charged.append(1))
     assert charged == [1]
     assert result.referenced_item_ids == [item_a.item_id]
-    assert result.content == '안 매워요.'
+    assert '보류' in result.content
 
 
 def test_chunk_document_used_by_retriever_matches_chunking_module():
@@ -146,3 +146,18 @@ def test_named_target_and_followup_memory():
     assert resolve_targets(analysis, ChatMessage(role='user', content='다른 요리 알려줘')) == []
     analysis.messages.append(ChatMessage(role='assistant', content='비교', referenced_item_ids=[ramen.item_id, chicken.item_id]))
     assert resolve_targets(analysis, ChatMessage(role='user', content='그거는?')) == []
+
+
+def test_edit_translation_restored_and_ungrounded_description_withheld():
+    from backend.provider import DescribeOutput
+    provider = make_provider()
+    provider._retriever = make_retriever()
+    item = MenuItem(original_name='味噌ラーメン', translated_name='')
+    with patch.object(provider, 'client') as client:
+        client.responses.parse.return_value.output_parsed = DescribeOutput(
+            translated_name='미소 라멘', description='검증되지 않은 내용',
+            supporting_chunk_ids=['invented'], insufficient_evidence=False)
+        provider.describe(item, lambda: None)
+    assert item.translated_name == '미소 라멘'
+    assert '보류' in item.description
+    assert item.citations == []
