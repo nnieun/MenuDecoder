@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { STATUS_LABELS } from '../constants/statusLabels';
 import useAnalysis from '../hooks/useAnalysis';
+import useDialogFocus from '../hooks/useDialogFocus';
 import { api, newKey, clearSession, safeUrl, ApiError, type StrictAnalysis, type StrictItem, type StrictMessage } from '../api/client';
 
 type MenuItem = StrictItem;
@@ -29,10 +30,7 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
 
 // ─── Citations Panel ──────────────────────────────────────────────────────────
 function CitationsPanel({ item, onClose }: { item: MenuItem; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
+  const dialogRef = useDialogFocus(onClose);
 
   return (
     <div
@@ -62,11 +60,12 @@ function CitationsPanel({ item, onClose }: { item: MenuItem; onClose: () => void
             {item.citations.map((c) => {
               const url = safeUrl(c.source_url);
               return (
-                <div key={c.source_id} className="bg-gray-50 rounded-xl p-3 mb-2">
+                <div key={c.chunk_id} className="bg-gray-50 rounded-xl p-3 mb-2">
                   <p className="text-sm font-medium text-gray-800">{c.document_title}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {c.section_path}
-                    {c.printed_page_label ? ` · ${c.printed_page_label}` : c.pdf_page_index != null ? ` · p.${c.pdf_page_index + 1}` : ''}
+                    {c.printed_page_label ? ` · 인쇄 페이지 ${c.printed_page_label}` : ''}
+                    {c.pdf_page_index != null ? ` · PDF ${c.pdf_page_index + 1}쪽` : ''}
                   </p>
                   {url && (
                     <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-500 mt-1 inline-block">
@@ -118,8 +117,7 @@ function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => v
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  const dialogRef = useDialogFocus(onClose);
 
   async function handleSave() {
     if (!value.trim() || value === item.original_name) { onClose(); return; }
@@ -135,7 +133,7 @@ function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => v
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="원문 수정">
+    <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="원문 수정">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-md mx-auto bg-white rounded-t-3xl px-5 pt-5 pb-10"
            onKeyDown={(e) => e.key === 'Escape' && onClose()}>
@@ -183,6 +181,7 @@ function MenuCard({
   onEdit: (item: MenuItem) => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  useEffect(() => setImgError(false), [item.item_version, item.images[0]?.image_url]);
   const isSearching = item.status === 'searching_images';
 
   return (
@@ -276,8 +275,9 @@ function MenuCard({
 
 // ─── Delete Confirm ───────────────────────────────────────────────────────────
 function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () => void; onConfirm: () => void; error: string; deleting: boolean }) {
+  const dialogRef = useDialogFocus(onCancel);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-5" role="dialog" aria-modal="true">
+    <div ref={dialogRef} tabIndex={-1} aria-label="분석 삭제 확인" className="fixed inset-0 z-50 flex items-center justify-center px-5" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
       <div className="relative bg-white rounded-2xl px-5 pt-6 pb-5 w-full max-w-sm shadow-xl">
         <h2 className="font-bold text-gray-900 text-base mb-2">분석을 삭제할까요?</h2>
@@ -500,6 +500,12 @@ export default function AnalysisPage() {
                   }`}
                 >
                   {msg.content}
+                  {msg.citations.length > 0 && <ul className="mt-2 text-xs space-y-1">
+                    {msg.citations.map(c => <li key={c.chunk_id}>
+                      <a href={safeUrl(c.source_url)} target="_blank" rel="noopener noreferrer" className="underline">{c.document_title}</a>
+                      <span> · {c.section_path}{c.pdf_page_index != null ? ` · PDF ${c.pdf_page_index + 1}쪽` : ''}</span>
+                    </li>)}
+                  </ul>}
                   {msg.status === 'sending' && (
                     <span className="ml-1 inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
                   )}
