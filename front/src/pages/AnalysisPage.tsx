@@ -244,8 +244,8 @@ function MenuCard({
         )}
 
         {/* Warnings */}
-        {item.warnings.map((w) => (
-          <div key={w} className="flex items-start gap-1.5 mb-3 bg-yellow-50 rounded-lg px-3 py-2">
+        {item.warnings.map((w, i) => (
+          <div key={i} className="flex items-start gap-1.5 mb-3 bg-yellow-50 rounded-lg px-3 py-2">
             <span className="text-yellow-500 text-xs mt-0.5">⚠️</span>
             <span className="text-xs text-yellow-700">{w}</span>
           </div>
@@ -450,8 +450,8 @@ export default function AnalysisPage() {
 
         {analysis.warnings.length > 0 && (
           <div className="mx-4 mt-3 mb-1 flex flex-col gap-2">
-            {analysis.warnings.map((w) => (
-              <div key={w} className="bg-yellow-50 border border-yellow-100 rounded-xl px-3 py-2 flex items-start gap-2">
+            {analysis.warnings.map((w, i) => (
+              <div key={i} className="bg-yellow-50 border border-yellow-100 rounded-xl px-3 py-2 flex items-start gap-2">
                 <span className="text-yellow-500 text-xs mt-0.5">⚠️</span>
                 <p className="text-xs text-yellow-700">{w}</p>
               </div>
