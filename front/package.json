@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "format": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:e2e": "playwright test",
     "gen:types": "openapi-typescript ../docs/openapi.json -o src/api/schema.ts"
   },
   "dependencies": {

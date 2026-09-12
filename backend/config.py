@@ -10,7 +10,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ''
     openai_model: str = 'gpt-5-mini'
     embedding_model: str = 'text-embedding-3-small'
-    cors_origins: list[str] = ['http://127.0.0.1:5173', 'http://localhost:5173']
+    cors_origins: list[str] = [
+        'http://127.0.0.1:5173', 'http://localhost:5173',  # vite dev server
+        'http://127.0.0.1:5179', 'http://localhost:5179',  # playwright e2e (separate port so it doesn't clash with dev)
+    ]
     session_ttl_seconds: int = 86400
     max_upload_bytes: int = 3145728
     max_image_pixels: int = 20000000
