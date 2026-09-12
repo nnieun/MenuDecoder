@@ -62,6 +62,15 @@ def test_citations_from_empty_when_nothing_valid():
     assert _citations_from(['bogus'], retriever.chunks, retriever) == []
 
 
+def test_citations_from_dedupes_repeated_chunk_ids():
+    retriever = make_retriever()
+    chunks = retriever.chunks
+    real_id = chunks[0].chunk_id
+    result = _citations_from([real_id, real_id], chunks, retriever)
+    assert len(result) == 1
+    assert result[0].chunk_id == real_id
+
+
 def test_context_block_includes_document_title_and_text():
     retriever = make_retriever()
     block = _context_block(retriever.chunks, retriever)

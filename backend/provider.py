@@ -56,14 +56,18 @@ def _context_block(chunks, retriever: Retriever) -> str:
 
 def _citations_from(result_chunk_ids, chunks, retriever: Retriever) -> list[Citation]:
     valid = {c.chunk_id: c for c in chunks}
+    seen: set[str] = set()
     citations = []
     for chunk_id in result_chunk_ids:
+        if chunk_id in seen:
+            continue  # 모델이 같은 근거 번호를 중복 인용하면 프론트 key 충돌로 이어진다
         chunk = valid.get(chunk_id)
         if chunk is None:
             continue  # 존재하지 않는(혹은 지어낸) 근거 번호는 표시 전에 거절한다
         document = retriever.document_for(chunk.source_id)
         if document is None:
             continue
+        seen.add(chunk_id)
         citations.append(_citation(chunk, document))
     return citations
 
