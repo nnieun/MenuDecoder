@@ -41,6 +41,9 @@ class Store:
         self.lock = RLock()
         self.total_calls = 0
         self.on_delete = lambda _: None
+        # Process-local secret so the session token can't be recomputed from a
+        # leaked Idempotency-Key alone (e.g. captured in access/gateway logs).
+        self.secret = secrets.token_bytes(32)
 
     def cleanup(self):
         with self.lock:
@@ -63,10 +66,11 @@ class Store:
     def create(self, key, image, mime):
         self.cleanup()
         # Initial key is a 256-bit client capability. Server retains only its hash;
-        # retry token is derived from that same capability, not stored as plaintext.
+        # retry token is derived from that same capability plus a server-side secret
+        # (not stored as plaintext, and not computable from a leaked key alone).
         key_hash = digest(key.encode())
         payload_hash = digest(mime.encode() + image)
-        token = digest(('menu-session:' + key).encode())
+        token = hmac.new(self.secret, ('menu-session:' + key).encode(), hashlib.sha256).hexdigest()
         with self.lock:
             if key_hash in self.initial:
                 previous_hash, sid = self.initial[key_hash]
