@@ -299,7 +299,10 @@ export default function AnalysisPage() {
   const { analysisId } = useParams();
   const navigate = useNavigate();
   const { analysis, accept, error, errorStatus, setError, refresh } = useAnalysis(analysisId ?? '');
-  const [citationItem, setCitationItem] = useState<MenuItem | null>(null);
+  const [citationItemId, setCitationItemId] = useState<string | null>(null);
+  const citationItem = citationItemId
+    ? analysis?.items.find((i) => i.item_id === citationItemId) ?? null
+    : null;
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [showDelete, setShowDelete] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -465,7 +468,7 @@ export default function AnalysisPage() {
             <MenuCard
               key={item.item_id}
               item={item}
-              onCitations={setCitationItem}
+              onCitations={(i) => setCitationItemId(i.item_id ?? null)}
               onEdit={setEditItem}
             />
           ))}
@@ -552,7 +555,7 @@ export default function AnalysisPage() {
       </div>
 
       {/* Panels */}
-      {citationItem && <CitationsPanel item={citationItem} onClose={() => setCitationItem(null)} />}
+      {citationItem && <CitationsPanel item={citationItem} onClose={() => setCitationItemId(null)} />}
       {editItem && <EditPanel item={editItem} onClose={() => { setEditItem(null); setError(''); }} onSave={handleEditSave} />}
       {showDelete && (
         <DeleteConfirm
