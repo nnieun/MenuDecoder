@@ -91,6 +91,14 @@ def test_expiry_and_version():
     assert client.get(path, headers=auth).status_code == 404
 
 
+def test_continue_after_completion_is_a_no_op():
+    _, client, path, auth, _ = setup()
+    state = finish(client, path, auth)
+    response = client.post(path + '/continue', json={'state_version': state['state_version']}, headers=auth | key())
+    assert response.status_code == 200, response.text
+    assert response.json()['state_version'] == state['state_version']
+
+
 def test_partial_failure_preserves_success():
     class Broken(MockProvider):
         def images(self, item, charge):

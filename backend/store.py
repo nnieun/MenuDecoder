@@ -122,10 +122,11 @@ class Store:
                 return result.model_copy(deep=True)
             if len(session.operations) >= self.settings.max_steps * 3:
                 raise DomainError(429, 'RATE_LIMITED', '세션 요청 한도에 도달했어요.')
-            action()
+            changed = action()
             if session.deleted:
                 raise DomainError(404, 'ANALYSIS_NOT_FOUND', '삭제된 분석이에요.')
-            session.analysis.state_version += 1
+            if changed is not False:
+                session.analysis.state_version += 1
             result = session.analysis.model_copy(deep=True)
             session.operations[operation_key] = (fingerprint, result)
             return result

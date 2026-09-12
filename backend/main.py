@@ -107,6 +107,8 @@ def create_app(settings=None, provider=None):
         def action():
             if body.state_version != session.analysis.state_version:
                 raise DomainError(409, 'STATE_CONFLICT', '분석 상태가 바뀌었어요. 새로 조회해 주세요.', True)
+            if not session.analysis.remaining_work:
+                return False  # nothing to advance; avoid bumping state_version on a no-op
             engine.run(session)
         return store.mutate(session, 'continue', request_key, body.model_dump_json(), action)
 
