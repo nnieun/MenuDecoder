@@ -97,14 +97,17 @@ class VectorRetriever(Retriever):
         if collection.metadata.get('version') != self.version or collection.count() != len(self.chunks):
             raise ValueError('Index version/count mismatch: rebuild required')
         vector = self.embedder.encode([query], charge)[0]
-        result = collection.query(query_embeddings=[vector], n_results=min(20, len(self.chunks)), include=['embeddings', 'distances'])
+        # Candidate pool must grow with top_k, or a relevant chunk ranked just
+        # outside a fixed window could never surface no matter what top_k is asked for.
+        pool = min(max(20, top_k * 4), len(self.chunks))
+        result = collection.query(query_embeddings=[vector], n_results=pool, include=['embeddings', 'distances'])
         dense = result['ids'][0]
         if mode == 'mmr':
             selected = mmr(vector, result['embeddings'][0], top_k)
             ids = [dense[i] for i in selected]
         elif mode == 'hybrid':
-            sparse = [c.chunk_id for c in super().search(query, 20)]
-            ids = rrf([sparse, dense])
+            sparse = [c.chunk_id for c in super().search(query, pool)]
+            ids = rrf([sparse, dense], limit=pool)
         else:
             ids = dense
         chunks = [self.by_id[i] for i in ids]
