@@ -5,7 +5,7 @@ OpenAI API) are not exercised here - they cost money and need
 OPENAI_API_KEY in backend/.env. Those are verified manually; see
 backend/rag/README.md's "다음 단계" note for how.
 """
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.config import Settings
 from backend.models import Analysis, ChatMessage, MenuItem
@@ -14,6 +14,8 @@ from backend.provider import (
     _citation,
     _citations_from,
     _context_block,
+    _first_url_citation,
+    _has_leftover_japanese,
     _public_url,
     image_candidates,
 )
@@ -28,12 +30,28 @@ def make_provider():
 
 
 def make_retriever():
+    # At least 3 documents, not 1: BM25Okapi's classic (unsmoothed) IDF is
+    # log((N - n + 0.5) / (n + 0.5)). At N=1 (n=1) that's already <= 0, and
+    # at N=2, n=1 it lands exactly on log(1) == 0 - both degenerate cases
+    # score every real match as 0, so search() always returned [] regardless
+    # of query. That silently made every describe() test exercise the empty-
+    # chunks/web-fallback path instead of the intended document-grounded one.
     doc = Document(
         source_id='doc-1', title='Test Doc', doc_type='html', url='https://example.com/a',
         language='en', publisher='Test', license_note='n', collected_at=now(), content_hash='h',
         sections=[Section(section_path='Test Doc > Intro', text='Ramen is a Japanese noodle soup with broth.')],
     )
-    return Retriever([doc], chunk_size=256)
+    other = Document(
+        source_id='doc-2', title='Other Doc', doc_type='html', url='https://example.com/b',
+        language='en', publisher='Test', license_note='n', collected_at=now(), content_hash='h2',
+        sections=[Section(section_path='Other Doc > Intro', text='Etiquette at a restaurant table setting.')],
+    )
+    third = Document(
+        source_id='doc-3', title='Third Doc', doc_type='html', url='https://example.com/c',
+        language='en', publisher='Test', license_note='n', collected_at=now(), content_hash='h3',
+        sections=[Section(section_path='Third Doc > Intro', text='Sushi rice vinegar preparation techniques vary by region.')],
+    )
+    return Retriever([doc, other, third], chunk_size=256)
 
 
 def test_citation_maps_chunk_and_document_fields():
@@ -170,3 +188,76 @@ def test_edit_translation_restored_and_ungrounded_description_withheld():
     assert item.translated_name == '미소 라멘'
     assert '보류' in item.description
     assert item.citations == []
+
+
+def test_detects_leftover_japanese_in_translation():
+    # Real case: model transliterated part of a proper-noun nickname
+    # ('ま～さん') and left the rest in katakana/hiragana instead of Hangul.
+    assert _has_leftover_japanese('마ーさん 덮밥(바라치라시)')
+    assert _has_leftover_japanese('焼き鳥')
+    assert not _has_leftover_japanese('미소 라멘')
+    assert not _has_leftover_japanese('참치덮밥(1,130원)')
+
+
+def _fake_response(output):
+    response = Mock()
+    response.model_dump.return_value = {'output': output}
+    return response
+
+
+def test_first_url_citation_reads_real_annotation_only():
+    good = {'type': 'message', 'content': [{'annotations': [
+        {'type': 'url_citation', 'url': 'https://www.maff.go.jp/e/x', 'title': 'MAFF'},
+    ]}]}
+    assert _first_url_citation(_fake_response([good])) == {'title': 'MAFF', 'url': 'https://www.maff.go.jp/e/x'}
+
+
+def test_first_url_citation_none_when_no_message():
+    assert _first_url_citation(_fake_response([{'type': 'web_search_call', 'status': 'completed'}])) is None
+
+
+def test_first_url_citation_rejects_non_public_url():
+    bad = {'type': 'message', 'content': [{'annotations': [
+        {'type': 'url_citation', 'url': 'https://127.0.0.1/x', 'title': 'internal'},
+    ]}]}
+    assert _first_url_citation(_fake_response([bad])) is None
+
+
+def test_describe_falls_back_to_web_search_when_corpus_has_nothing():
+    from backend.provider import DescribeOutput
+    provider = make_provider()
+    provider._retriever = make_retriever()
+    # A query this fake corpus (ramen/etiquette/sushi) has no term overlap with.
+    item = MenuItem(original_name='全く関係ない特殊料理', translated_name='')
+    with patch.object(provider, 'client') as client:
+        message = {'type': 'message', 'content': [{'annotations': [
+            {'type': 'url_citation', 'url': 'https://www.maff.go.jp/e/some-dish', 'title': 'Some Dish : MAFF'},
+        ]}]}
+        client.responses.create.return_value.model_dump.return_value = {'output': [message]}
+        client.responses.create.return_value.output_text = '이 요리는 ...입니다.'
+        provider.describe(item, lambda: None)
+        # self.retrieve() tries one query-rewrite (.parse, QueryPlan) before
+        # giving up on the internal corpus - that's expected. The actual
+        # description generation must go through .create with web_search,
+        # not the internal document-grounded .parse(text_format=DescribeOutput).
+        client.responses.create.assert_called_once()
+        for call in client.responses.parse.call_args_list:
+            assert call.kwargs.get('text_format') is not DescribeOutput
+    assert item.description == '이 요리는 ...입니다.'
+    assert len(item.citations) == 1
+    assert item.citations[0].source_id == 'web-search'
+    assert str(item.citations[0].source_url) == 'https://www.maff.go.jp/e/some-dish'
+    assert item.warnings == []
+
+
+def test_describe_web_fallback_withholds_when_no_real_citation():
+    provider = make_provider()
+    provider._retriever = make_retriever()
+    item = MenuItem(original_name='全く関係ない特殊料理', translated_name='')
+    with patch.object(provider, 'client') as client:
+        client.responses.create.return_value.model_dump.return_value = {'output': []}
+        client.responses.create.return_value.output_text = '확인되지 않음'
+        provider.describe(item, lambda: None)
+    assert '보류' in item.description
+    assert item.citations == []
+    assert '근거를 확인할 수 없어요.' in item.warnings

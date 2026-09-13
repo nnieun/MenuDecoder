@@ -219,6 +219,11 @@ export interface components {
             referenced_item_ids?: string[];
             /** Citations */
             citations?: components["schemas"]["Citation"][];
+            /**
+             * Silent
+             * @default false
+             */
+            silent: boolean;
         };
         /** Citation */
         Citation: {
@@ -358,6 +363,10 @@ export interface components {
             images?: components["schemas"]["MenuImage"][];
             /** Warnings */
             warnings?: string[];
+            /** Center X */
+            center_x?: number | null;
+            /** Center Y */
+            center_y?: number | null;
         };
         /** MessageRequest */
         MessageRequest: {
@@ -365,6 +374,11 @@ export interface components {
             content: string;
             /** Referenced Item Ids */
             referenced_item_ids?: string[];
+            /**
+             * Silent
+             * @default false
+             */
+            silent: boolean;
         };
     };
     responses: never;

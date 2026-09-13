@@ -123,7 +123,7 @@ def create_app(settings=None, provider=None):
                 raise DomainError(429, 'RATE_LIMITED', '대화 한도에 도달했어요.')
             if not set(body.referenced_item_ids).issubset({i.item_id for i in a.items}):
                 raise DomainError(422, 'VALIDATION_ERROR', '현재 분석에 없는 메뉴예요.')
-            a.messages.append(ChatMessage(role='user', content=body.content, status='sending', referenced_item_ids=body.referenced_item_ids))
+            a.messages.append(ChatMessage(role='user', content=body.content, status='sending', referenced_item_ids=body.referenced_item_ids, silent=body.silent))
             a.status, a.remaining_work = 'partial', True
         return store.mutate(session, 'messages', request_key, body.model_dump_json(), action)
 

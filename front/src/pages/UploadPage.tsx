@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPhoto, setPhoto, clearPhoto, transformPhoto } from '../features/upload';
+import { getPhoto, setPhoto, clearPhoto, transformPhoto, savePhotoForAnalysis } from '../features/upload';
 import { api, newKey, ApiError } from '../api/client';
 
 type Rotation = 0 | 90 | 180 | 270;
@@ -62,6 +62,7 @@ export default function UploadPage() {
     try {
       const blob = await transformPhoto(rotation, crop);
       const accepted = await api.create(blob, newKey());
+      await savePhotoForAnalysis(accepted.analysis_id, blob);
       clearPhoto();
       navigate(`/analyses/${accepted.analysis_id}`, { replace: true });
     } catch (err) {

@@ -3,10 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { STATUS_LABELS } from '../constants/statusLabels';
 import useAnalysis from '../hooks/useAnalysis';
 import useDialogFocus from '../hooks/useDialogFocus';
+import { getPhotoForAnalysis, clearPhotoForAnalysis } from '../features/upload';
 import { api, newKey, clearSession, safeUrl, ApiError, type StrictAnalysis, type StrictItem, type StrictMessage } from '../api/client';
 
 type MenuItem = StrictItem;
 type DisplayStatus = StrictAnalysis['status'] | 'session_expired';
+// Must match backend/targets.py's NO_IMAGE_FOUND_WARNING exactly.
+const NO_IMAGE_FOUND_WARNING = '참고 사진을 찾지 못했어요.';
 
 // ─── Status Badge ────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: DisplayStatus }) {
@@ -173,21 +176,38 @@ function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => v
 // ─── Menu Card ────────────────────────────────────────────────────────────────
 function MenuCard({
   item,
+  number,
   onCitations,
   onEdit,
+  onAsk,
+  asking,
 }: {
   item: MenuItem;
+  number: number;
   onCitations: (item: MenuItem) => void;
   onEdit: (item: MenuItem) => void;
+  onAsk: (item: MenuItem) => void;
+  asking: boolean;
 }) {
   const [imgError, setImgError] = useState(false);
   useEffect(() => setImgError(false), [item.item_version, item.images[0]?.image_url]);
-  const isSearching = item.status === 'searching_images';
+  // Photo search is on-demand now (see backend/graph.py) - this card only
+  // ever renders while it's the one open (accordion), so "asking" in flight
+  // with no image and no "not found" warning yet means its fetch is running.
+  const isSearching = asking && item.images.length === 0 && !item.warnings.includes(NO_IMAGE_FOUND_WARNING) && item.status !== 'failed';
 
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
       {/* Image */}
       <div className="relative bg-gray-100 aspect-[4/3]">
+        {item.center_x != null && item.center_y != null && (
+          <span
+            className="absolute top-2 right-2 z-10 w-6 h-6 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow"
+            aria-label={`원본 사진의 ${number}번 위치`}
+          >
+            {number}
+          </span>
+        )}
         {isSearching && item.images.length === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <span className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
@@ -239,8 +259,21 @@ function MenuCard({
           <p className="text-sm text-gray-700 leading-relaxed mb-3">{item.description}</p>
         ) : item.status === 'failed' ? (
           <p className="text-sm text-red-500 leading-relaxed mb-3">이 메뉴는 처리하지 못했어요. 원문 수정으로 다시 시도할 수 있어요.</p>
+        ) : item.status === 'done' ? (
+          <button
+            onClick={() => onAsk(item)}
+            disabled={asking}
+            className="w-full text-left text-sm text-orange-600 bg-orange-50 disabled:opacity-60 rounded-lg px-3 py-2.5 mb-3 flex items-center gap-2"
+          >
+            {asking ? (
+              <span className="w-3.5 h-3.5 border border-orange-400 border-t-transparent rounded-full animate-spin inline-block shrink-0" />
+            ) : (
+              <span>💬</span>
+            )}
+            이 메뉴가 궁금하신가요? 탭해서 설명을 물어보세요
+          </button>
         ) : (
-          <p className="text-sm text-gray-400 leading-relaxed mb-3 italic">설명을 불러오고 있어요...</p>
+          <p className="text-sm text-gray-400 leading-relaxed mb-3 italic">메뉴를 확인하고 있어요...</p>
         )}
 
         {/* Warnings */}
@@ -294,6 +327,120 @@ function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () 
   );
 }
 
+// ─── Original Photo ───────────────────────────────────────────────────────────
+// Server discards the uploaded photo after extraction, so this reads the client-
+// side copy (features/upload.ts) so users can eyeball the original Japanese text
+// against the recognized items themselves.
+function OriginalPhoto({ url }: { url: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+
+  return (
+    <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-gray-600"
+        aria-expanded={expanded}
+      >
+        <span>📷 원본 사진과 대조하기</span>
+        <span className="text-gray-400">{expanded ? '접기 ▲' : '펼치기 ▼'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100">
+          <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
+            <img
+              src={url}
+              alt="업로드한 메뉴판 원본 사진"
+              onClick={() => setZoomed((z) => !z)}
+              className={zoomed ? 'max-w-none cursor-zoom-out block' : 'max-w-full cursor-zoom-in block'}
+              style={zoomed ? undefined : { maxHeight: '60vh' }}
+            />
+          </div>
+          <p className="text-[11px] text-gray-400 px-3 py-1.5">사진을 탭하면 확대/축소돼요.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Translated Photo ─────────────────────────────────────────────────────────
+// Separate from OriginalPhoto: this overlays the numbered location pins on
+// the same photo, so "그냥 원본 보기" and "번역 위치 확인하기" stay two
+// distinct, independently collapsible actions instead of one crowded panel.
+//
+// center_x/center_y (when present) are the vision model's own rough guess at
+// where an item's text sits in the photo - not a precise, verified bounding
+// box (see docs/experiments). Pins can land a row off, so tapping one only
+// shows a small label rather than claiming an exact match; the number also
+// matches the badge on that item's card so a wrong pin position still points
+// the user to the right card.
+function TranslatedPhoto({ url, items, onSelect }: { url: string; items: MenuItem[]; onSelect: (item: MenuItem) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const pins = items
+    .map((item, index) => ({ item, number: index + 1 }))
+    .filter(({ item }) => item.center_x != null && item.center_y != null);
+  const active = pins.find(({ item }) => item.item_id === activePinId)?.item;
+
+  if (pins.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-gray-600"
+        aria-expanded={expanded}
+      >
+        <span>🈂️ 번역된 사진 보기</span>
+        <span className="text-gray-400">{expanded ? '접기 ▲' : '펼치기 ▼'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100">
+          <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
+            <div className="relative inline-block" onClick={() => setActivePinId(null)}>
+              <img
+                src={url}
+                alt="메뉴판 사진. 번호를 탭하면 그 자리의 메뉴 이름을 한국어로 확인할 수 있어요."
+                onClick={(e) => { e.stopPropagation(); setZoomed((z) => !z); }}
+                className={zoomed ? 'max-w-none cursor-zoom-out block' : 'max-w-full cursor-zoom-in block'}
+                style={zoomed ? undefined : { maxHeight: '60vh' }}
+              />
+              {pins.map(({ item, number }) => (
+                <button
+                  key={item.item_id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActivePinId((id) => (id === item.item_id ? null : item.item_id));
+                    onSelect(item);
+                  }}
+                  className="absolute w-6 h-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow"
+                  style={{ left: `${(item.center_x ?? 0) * 100}%`, top: `${(item.center_y ?? 0) * 100}%` }}
+                  aria-label={`${number}번 ${item.translated_name || item.original_name} 대략적 위치. 탭하면 상세 정보를 불러와요.`}
+                >
+                  {number}
+                </button>
+              ))}
+              {active && (
+                <div
+                  className="absolute z-10 bg-black/80 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap pointer-events-none"
+                  style={{ left: `${(active.center_x ?? 0) * 100}%`, top: `${(active.center_y ?? 0) * 100}%`, transform: 'translate(-50%, calc(-100% - 16px))' }}
+                >
+                  <p className="font-semibold">{active.translated_name || active.original_name}</p>
+                  {active.original_price_text && <p className="opacity-80">{active.original_price_text}</p>}
+                </div>
+              )}
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 px-3 py-1.5">
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴 카드를 열어요.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Analysis Page ────────────────────────────────────────────────────────────
 export default function AnalysisPage() {
   const { analysisId } = useParams();
@@ -312,6 +459,8 @@ export default function AnalysisPage() {
   const [chatError, setChatError] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [photoUrl] = useState(() => (analysisId ? getPhotoForAnalysis(analysisId) : null));
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!analysisId) navigate('/', { replace: true });
@@ -321,20 +470,42 @@ export default function AnalysisPage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [analysis?.messages.length]);
 
-  async function handleSendMessage() {
-    const content = chatInput.trim();
+  async function sendMessage(content: string, referencedItemIds: string[] = [], silent = false) {
     if (!content || sendingChat || !analysisId) return;
     setSendingChat(true);
     setChatError('');
     try {
-      const updated = await api.message(analysisId, content, newKey());
+      const updated = await api.message(analysisId, content, newKey(), referencedItemIds, silent);
       accept(updated);
-      setChatInput('');
+      if (!silent) setChatInput('');
       refresh();
     } catch (err) {
       setChatError(err instanceof ApiError ? err.message : (err as Error).message);
     } finally {
       setSendingChat(false);
+    }
+  }
+
+  function handleSendMessage() {
+    return sendMessage(chatInput.trim());
+  }
+
+  // Menu cards no longer come with a description pre-filled (EX: lazy
+  // description) - tapping "설명 물어보기" is a shortcut for typing the same
+  // question, so it goes through the exact same chat path and citations.
+  function handleAskAbout(item: MenuItem) {
+    return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
+  }
+
+  // Opens/closes that item's card. Opening also fetches its description+photo
+  // right away (silent=true), so the card doesn't feel broken while empty -
+  // but it must not look like the user asked a question. Only the explicit
+  // "궁금하신가요?" button inside the card sends a real, visible question.
+  function selectItem(item: MenuItem) {
+    const opening = selectedItemId !== item.item_id;
+    setSelectedItemId((id) => (id === item.item_id ? null : item.item_id));
+    if (opening && (item.description === '' || (item.images.length === 0 && !item.warnings.includes(NO_IMAGE_FOUND_WARNING)))) {
+      sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id], true);
     }
   }
 
@@ -347,7 +518,7 @@ export default function AnalysisPage() {
       if (err instanceof ApiError && err.status === 409) {
         const latest = await api.get(analysisId); accept(latest);
         const current = (latest.items ?? []).find(i => i.item_id === item.item_id);
-        if (current) setEditItem({ ...current, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
+        if (current) setEditItem({ ...current, item_id: current.item_id!, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
       }
       throw err;
     }
@@ -360,6 +531,7 @@ export default function AnalysisPage() {
     try {
       await api.delete(analysisId);
       clearSession();
+      clearPhotoForAnalysis(analysisId);
       navigate('/', { replace: true });
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -441,6 +613,17 @@ export default function AnalysisPage() {
       </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
+        {photoUrl ? (
+          <>
+            <OriginalPhoto url={photoUrl} />
+            <TranslatedPhoto url={photoUrl} items={analysis.items} onSelect={selectItem} />
+          </>
+        ) : (
+          <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 flex items-start gap-2">
+            <span className="text-gray-400 text-xs mt-0.5">📷</span>
+            <p className="text-xs text-gray-500">이 브라우저 세션에서 원본 사진을 찾을 수 없어요. 이 화면을 새로고침했거나 다른 탭에서 열었다면 사진이 사라질 수 있어요 - 분석 결과는 그대로 남아있어요.</p>
+          </div>
+        )}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
@@ -459,18 +642,49 @@ export default function AnalysisPage() {
           </div>
         )}
 
-        {/* Menu cards */}
+        {/* Menu chips: tap a recognized name to open just that card (accordion) */}
+        {analysis.items.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pt-3">
+            {analysis.items.map((item, index) => {
+              const isOpen = selectedItemId === item.item_id;
+              return (
+                <button
+                  key={item.item_id}
+                  onClick={() => selectItem(item)}
+                  className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-full border transition-colors ${
+                    isOpen ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-gray-200 text-gray-700'
+                  }`}
+                  aria-pressed={isOpen}
+                >
+                  <span className={`w-4 h-4 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${
+                    isOpen ? 'bg-white/25 text-white' : 'bg-orange-50 text-orange-600'
+                  }`}>{index + 1}</span>
+                  {item.translated_name || item.original_name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex flex-col gap-3 px-4 py-3">
           {analysis.items.length === 0 && !analysis.remaining_work && (
             <p className="text-sm text-gray-400 text-center py-10">인식된 메뉴가 없어요.</p>
           )}
-          {analysis.items.map((item) => (
-            <MenuCard
-              key={item.item_id}
-              item={item}
-              onCitations={(i) => setCitationItemId(i.item_id ?? null)}
-              onEdit={setEditItem}
-            />
+          {analysis.items.length > 0 && !selectedItemId && (
+            <p className="text-sm text-gray-400 text-center py-6">위에서 궁금한 메뉴를 탭해 보세요.</p>
+          )}
+          {analysis.items.map((item, index) => (
+            selectedItemId === item.item_id && (
+              <MenuCard
+                key={item.item_id}
+                item={item}
+                number={index + 1}
+                onCitations={(i) => setCitationItemId(i.item_id ?? null)}
+                onEdit={setEditItem}
+                onAsk={handleAskAbout}
+                asking={sendingChat}
+              />
+            )
           ))}
           {analysis.remaining_work && (
             <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-400">
@@ -480,15 +694,16 @@ export default function AnalysisPage() {
           )}
         </div>
 
-        {/* Chat messages */}
-        {analysis.messages.length > 0 && (
+        {/* Chat messages - silent messages (chip/pin taps) fetch details in the
+            background but were never really "asked", so they're hidden here. */}
+        {analysis.messages.filter((msg: StrictMessage) => !msg.silent).length > 0 && (
           <div className="px-4 pb-3 flex flex-col gap-3">
             <div className="flex items-center gap-2 mt-2">
               <div className="flex-1 h-px bg-gray-100" />
               <span className="text-xs text-gray-400 shrink-0">대화</span>
               <div className="flex-1 h-px bg-gray-100" />
             </div>
-            {analysis.messages.map((msg: StrictMessage) => (
+            {analysis.messages.filter((msg: StrictMessage) => !msg.silent).map((msg: StrictMessage) => (
               <div key={msg.message_id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
                   <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-sm shrink-0 mr-2 mt-1">
