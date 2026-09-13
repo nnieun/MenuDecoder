@@ -14,6 +14,7 @@ from backend.provider import (
     _citation,
     _citations_from,
     _context_block,
+    _has_leftover_japanese,
     _public_url,
     image_candidates,
 )
@@ -170,3 +171,12 @@ def test_edit_translation_restored_and_ungrounded_description_withheld():
     assert item.translated_name == '미소 라멘'
     assert '보류' in item.description
     assert item.citations == []
+
+
+def test_detects_leftover_japanese_in_translation():
+    # Real case: model transliterated part of a proper-noun nickname
+    # ('ま～さん') and left the rest in katakana/hiragana instead of Hangul.
+    assert _has_leftover_japanese('마ーさん 덮밥(바라치라시)')
+    assert _has_leftover_japanese('焼き鳥')
+    assert not _has_leftover_japanese('미소 라멘')
+    assert not _has_leftover_japanese('참치덮밥(1,130원)')
