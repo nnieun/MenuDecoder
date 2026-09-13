@@ -219,6 +219,11 @@ export interface components {
             referenced_item_ids?: string[];
             /** Citations */
             citations?: components["schemas"]["Citation"][];
+            /**
+             * Silent
+             * @default false
+             */
+            silent: boolean;
         };
         /** Citation */
         Citation: {
@@ -369,6 +374,11 @@ export interface components {
             content: string;
             /** Referenced Item Ids */
             referenced_item_ids?: string[];
+            /**
+             * Silent
+             * @default false
+             */
+            silent: boolean;
         };
     };
     responses: never;

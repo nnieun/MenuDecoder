@@ -49,7 +49,7 @@ class Engine:
                 return 'describing'
             if any(needs_images(i) for i in target_items):
                 return 'images'
-            return 'answering'
+            return 'review' if message.silent else 'answering'
         for stage in stages:
             builder.add_node(stage, advance)
             builder.add_edge(stage, END)
@@ -130,6 +130,12 @@ class Engine:
                         current_item = next((i for i in target_items if needs_images(i)), None)
                         if current_item:
                             self.provider.images(current_item, charge)
+                        elif current_message.silent:
+                            # A chip/pin tap: photo + description are fetched
+                            # (above) but this must not read like the user
+                            # asked a question, so no answer() call and no
+                            # assistant reply - just close out the message.
+                            current_message.status = 'done'
                         else:
                             answer = self.provider.answer(a, current_message, charge)
                             current_message.status = 'done'

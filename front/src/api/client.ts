@@ -62,8 +62,8 @@ export const api = {
   },
   get: (id: string) => request<Analysis>(root(id), {}, id),
   advance: (id: string, version: number, key: string) => post<Analysis>(id, '/continue', { state_version: version }, key),
-  message: (id: string, content: string, _key: string, referencedItemIds: string[] = []) =>
-    retryableMutation(JSON.stringify([id, 'message', content, referencedItemIds]), key => post<Analysis>(id, '/messages', { content, referenced_item_ids: referencedItemIds }, key)),
+  message: (id: string, content: string, _key: string, referencedItemIds: string[] = [], silent = false) =>
+    retryableMutation(JSON.stringify([id, 'message', content, referencedItemIds, silent]), key => post<Analysis>(id, '/messages', { content, referenced_item_ids: referencedItemIds, silent }, key)),
   edit: (id: string, item: MenuItem, original_name: string, _key: string) => retryableMutation(JSON.stringify([id, item.item_id, item.item_version, original_name]), key => post<Analysis>(id, `/items/${item.item_id}`, { original_name, item_version: item.item_version }, key, 'PATCH')),
   delete: (id: string) => request<void>(root(id), { method: 'DELETE' }, id),
 };

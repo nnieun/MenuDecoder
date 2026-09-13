@@ -470,14 +470,14 @@ export default function AnalysisPage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [analysis?.messages.length]);
 
-  async function sendMessage(content: string, referencedItemIds: string[] = []) {
+  async function sendMessage(content: string, referencedItemIds: string[] = [], silent = false) {
     if (!content || sendingChat || !analysisId) return;
     setSendingChat(true);
     setChatError('');
     try {
-      const updated = await api.message(analysisId, content, newKey(), referencedItemIds);
+      const updated = await api.message(analysisId, content, newKey(), referencedItemIds, silent);
       accept(updated);
-      setChatInput('');
+      if (!silent) setChatInput('');
       refresh();
     } catch (err) {
       setChatError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -497,13 +497,16 @@ export default function AnalysisPage() {
     return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
   }
 
-  // Just opens/closes that item's card - it does NOT fetch anything. Tried
-  // auto-fetching on tap twice now (see git history) and both times it felt
-  // wrong to fire a real request just from browsing/peeking at a card; the
-  // explicit "궁금하신가요?" button inside the card is the only thing that
-  // should trigger describe()+images() (both fetched together there now).
+  // Opens/closes that item's card. Opening also fetches its description+photo
+  // right away (silent=true), so the card doesn't feel broken while empty -
+  // but it must not look like the user asked a question. Only the explicit
+  // "궁금하신가요?" button inside the card sends a real, visible question.
   function selectItem(item: MenuItem) {
+    const opening = selectedItemId !== item.item_id;
     setSelectedItemId((id) => (id === item.item_id ? null : item.item_id));
+    if (opening && (item.description === '' || (item.images.length === 0 && !item.warnings.includes(NO_IMAGE_FOUND_WARNING)))) {
+      sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id], true);
+    }
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {
@@ -691,15 +694,16 @@ export default function AnalysisPage() {
           )}
         </div>
 
-        {/* Chat messages */}
-        {analysis.messages.length > 0 && (
+        {/* Chat messages - silent messages (chip/pin taps) fetch details in the
+            background but were never really "asked", so they're hidden here. */}
+        {analysis.messages.filter((msg: StrictMessage) => !msg.silent).length > 0 && (
           <div className="px-4 pb-3 flex flex-col gap-3">
             <div className="flex items-center gap-2 mt-2">
               <div className="flex-1 h-px bg-gray-100" />
               <span className="text-xs text-gray-400 shrink-0">대화</span>
               <div className="flex-1 h-px bg-gray-100" />
             </div>
-            {analysis.messages.map((msg: StrictMessage) => (
+            {analysis.messages.filter((msg: StrictMessage) => !msg.silent).map((msg: StrictMessage) => (
               <div key={msg.message_id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
                   <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-sm shrink-0 mr-2 mt-1">

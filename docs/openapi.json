@@ -1210,6 +1210,11 @@
             },
             "type": "array",
             "title": "Citations"
+          },
+          "silent": {
+            "type": "boolean",
+            "title": "Silent",
+            "default": false
           }
         },
         "type": "object",
@@ -1552,6 +1557,11 @@
             "type": "array",
             "maxItems": 20,
             "title": "Referenced Item Ids"
+          },
+          "silent": {
+            "type": "boolean",
+            "title": "Silent",
+            "default": false
           }
         },
         "additionalProperties": false,

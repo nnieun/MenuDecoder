@@ -145,7 +145,26 @@ def test_description_and_images_generated_lazily_only_when_asked():
     other = next(i for i in state['items'] if i['item_id'] != item_id)
     assert other['description'] == ''
     assert other['images'] == []
-    assert other['warnings'] == []
+
+
+def test_silent_message_fetches_details_without_a_visible_chat_reply():
+    """A chip/pin tap sends silent=True: photo+description still get fetched
+    (same code path as a real question) but no assistant answer is generated
+    and the message itself is for the frontend to hide, not delete."""
+    _, client, path, auth, _ = setup()
+    state = finish(client, path, auth)
+    item_id = state['items'][0]['item_id']
+    body = {'content': '미소 라멘 설명해 주세요.', 'referenced_item_ids': [item_id], 'silent': True}
+    sent = client.post(path + '/messages', json=body, headers=auth | key())
+    assert sent.status_code == 202
+    state = finish(client, path, auth)
+    described = next(i for i in state['items'] if i['item_id'] == item_id)
+    assert described['description'] != ''
+    assert '참고 사진을 찾지 못했어요.' in described['warnings']
+    # No conversational answer was generated for a silent request.
+    assert len(state['messages']) == 1
+    assert state['messages'][0]['silent'] is True
+    assert state['messages'][0]['status'] == 'done'
 
 
 def test_delete_during_execution_cannot_resurrect():

@@ -58,6 +58,14 @@ class ChatMessage(BaseModel):
     status: Literal['sending', 'done', 'failed'] = 'done'
     referenced_item_ids: list[UUID] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    # A tap on a menu chip/pin fetches that item's photo+description the same
+    # way an explicit question does (describe()/images() are still driven by
+    # resolve_targets on this message), but it should not read like the user
+    # typed a question - the frontend hides silent messages from "대화" and
+    # the backend never generates a conversational answer for one (see
+    # graph.py). Not part of any user-facing product decision to hide the
+    # underlying fetch, only to not fake a chat exchange for it.
+    silent: bool = False
 
 
 class Analysis(BaseModel):
@@ -88,6 +96,7 @@ class ContinueRequest(StrictModel):
 class MessageRequest(StrictModel):
     content: str = Field(min_length=1, max_length=2000)
     referenced_item_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    silent: bool = False
 
 
 class EditRequest(StrictModel):
