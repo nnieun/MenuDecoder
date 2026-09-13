@@ -369,7 +369,7 @@ function OriginalPhoto({ url }: { url: string }) {
 // shows a small label rather than claiming an exact match; the number also
 // matches the badge on that item's card so a wrong pin position still points
 // the user to the right card.
-function TranslatedPhoto({ url, items }: { url: string; items: MenuItem[] }) {
+function TranslatedPhoto({ url, items, onSelect }: { url: string; items: MenuItem[]; onSelect: (item: MenuItem) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [activePinId, setActivePinId] = useState<string | null>(null);
@@ -404,10 +404,14 @@ function TranslatedPhoto({ url, items }: { url: string; items: MenuItem[] }) {
               {pins.map(({ item, number }) => (
                 <button
                   key={item.item_id}
-                  onClick={(e) => { e.stopPropagation(); setActivePinId((id) => (id === item.item_id ? null : item.item_id)); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActivePinId((id) => (id === item.item_id ? null : item.item_id));
+                    onSelect(item);
+                  }}
                   className="absolute w-6 h-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow"
                   style={{ left: `${(item.center_x ?? 0) * 100}%`, top: `${(item.center_y ?? 0) * 100}%` }}
-                  aria-label={`${number}번 ${item.translated_name || item.original_name} 대략적 위치`}
+                  aria-label={`${number}번 ${item.translated_name || item.original_name} 대략적 위치. 탭하면 상세 정보를 불러와요.`}
                 >
                   {number}
                 </button>
@@ -424,7 +428,7 @@ function TranslatedPhoto({ url, items }: { url: string; items: MenuItem[] }) {
             </div>
           </div>
           <p className="text-[11px] text-gray-400 px-3 py-1.5">
-            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여줘요.
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름과 함께 아래 카드에서 상세 설명을 불러와요.
           </p>
         </div>
       )}
@@ -486,6 +490,17 @@ export default function AnalysisPage() {
   // question, so it goes through the exact same chat path and citations.
   function handleAskAbout(item: MenuItem) {
     return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
+  }
+
+  // Tapping a chip or a photo pin does both at once: open that item's card
+  // AND fetch its description immediately, instead of requiring a second tap
+  // on the "궁금하신가요?" button inside the card.
+  function selectItem(item: MenuItem) {
+    const closing = selectedItemId === item.item_id;
+    setSelectedItemId(closing ? null : item.item_id);
+    if (!closing && !item.description && item.status !== 'failed' && !sendingChat) {
+      void handleAskAbout(item);
+    }
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {
@@ -593,7 +608,7 @@ export default function AnalysisPage() {
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
         {photoUrl && <OriginalPhoto url={photoUrl} />}
-        {photoUrl && <TranslatedPhoto url={photoUrl} items={analysis.items} />}
+        {photoUrl && <TranslatedPhoto url={photoUrl} items={analysis.items} onSelect={selectItem} />}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
@@ -620,7 +635,7 @@ export default function AnalysisPage() {
               return (
                 <button
                   key={item.item_id}
-                  onClick={() => setSelectedItemId((id) => (id === item.item_id ? null : item.item_id))}
+                  onClick={() => selectItem(item)}
                   className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-full border transition-colors ${
                     isOpen ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-gray-200 text-gray-700'
                   }`}
