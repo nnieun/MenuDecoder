@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { STATUS_LABELS } from '../constants/statusLabels';
 import useAnalysis from '../hooks/useAnalysis';
 import useDialogFocus from '../hooks/useDialogFocus';
+import { getPhotoForAnalysis, clearPhotoForAnalysis } from '../features/upload';
 import { api, newKey, clearSession, safeUrl, ApiError, type StrictAnalysis, type StrictItem, type StrictMessage } from '../api/client';
 
 type MenuItem = StrictItem;
@@ -294,6 +295,42 @@ function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () 
   );
 }
 
+// ─── Original Photo ───────────────────────────────────────────────────────────
+// Server discards the uploaded photo after extraction, so this reads the client-
+// side copy (features/upload.ts) so users can eyeball the original Japanese text
+// against the recognized items themselves - no automatic position matching.
+function OriginalPhoto({ url }: { url: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+
+  return (
+    <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-gray-600"
+        aria-expanded={expanded}
+      >
+        <span>📷 원본 사진과 대조하기</span>
+        <span className="text-gray-400">{expanded ? '접기 ▲' : '펼치기 ▼'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100">
+          <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
+            <img
+              src={url}
+              alt="업로드한 메뉴판 원본 사진. 인식된 이름·가격과 직접 대조해 보세요."
+              onClick={() => setZoomed((z) => !z)}
+              className={zoomed ? 'max-w-none cursor-zoom-out' : 'max-w-full object-contain cursor-zoom-in'}
+              style={zoomed ? undefined : { maxHeight: '60vh' }}
+            />
+          </div>
+          <p className="text-[11px] text-gray-400 px-3 py-1.5">사진을 탭하면 확대/축소돼요.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Analysis Page ────────────────────────────────────────────────────────────
 export default function AnalysisPage() {
   const { analysisId } = useParams();
@@ -312,6 +349,7 @@ export default function AnalysisPage() {
   const [chatError, setChatError] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [photoUrl] = useState(() => (analysisId ? getPhotoForAnalysis(analysisId) : null));
 
   useEffect(() => {
     if (!analysisId) navigate('/', { replace: true });
@@ -360,6 +398,7 @@ export default function AnalysisPage() {
     try {
       await api.delete(analysisId);
       clearSession();
+      clearPhotoForAnalysis(analysisId);
       navigate('/', { replace: true });
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -441,6 +480,7 @@ export default function AnalysisPage() {
       </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
+        {photoUrl && <OriginalPhoto url={photoUrl} />}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>

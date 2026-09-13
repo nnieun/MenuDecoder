@@ -28,3 +28,26 @@ export async function transformPhoto(rotation: number, crop: number[]) {
     return blob;
   } finally { image.close(); }
 }
+
+// Server discards the uploaded photo right after extraction (no re-fetch endpoint),
+// so the analysis screen keeps its own copy client-side for visual side-by-side
+// comparison. sessionStorage only - cleared with the tab, never sent anywhere.
+const photoKey = (analysisId: string) => `menu-decoder-photo:${analysisId}`;
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('사진을 저장하지 못했어요.'));
+    reader.readAsDataURL(blob);
+  });
+}
+export async function savePhotoForAnalysis(analysisId: string, blob: Blob) {
+  try { sessionStorage.setItem(photoKey(analysisId), await blobToDataUrl(blob)); }
+  catch { /* best-effort only; the analysis itself doesn't depend on this */ }
+}
+export function getPhotoForAnalysis(analysisId: string) {
+  try { return sessionStorage.getItem(photoKey(analysisId)); } catch { return null; }
+}
+export function clearPhotoForAnalysis(analysisId: string) {
+  try { sessionStorage.removeItem(photoKey(analysisId)); } catch { /* ignore */ }
+}
