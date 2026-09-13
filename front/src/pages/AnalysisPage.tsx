@@ -433,7 +433,7 @@ function TranslatedPhoto({ url, items, onSelect }: { url: string; items: MenuIte
             </div>
           </div>
           <p className="text-[11px] text-gray-400 px-3 py-1.5">
-            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴의 사진·설명을 불러와요.
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴 카드를 열어요.
           </p>
         </div>
       )}
@@ -497,19 +497,13 @@ export default function AnalysisPage() {
     return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
   }
 
-  // Opens that item's card AND fetches its description + reference photo in
-  // one tap. This was tried once before and reverted (see git history) over
-  // concern that browsing several chips to peek at card layout would fire a
-  // paid call each time - but the backend no longer auto-fetches photos for
-  // every item either (also on-demand now, see backend/graph.py), so a tap
-  // is the one deliberate "I want this one" action rather than a side effect
-  // of casual browsing. Re-tapping an open chip just closes it, no re-fetch.
+  // Just opens/closes that item's card - it does NOT fetch anything. Tried
+  // auto-fetching on tap twice now (see git history) and both times it felt
+  // wrong to fire a real request just from browsing/peeking at a card; the
+  // explicit "궁금하신가요?" button inside the card is the only thing that
+  // should trigger describe()+images() (both fetched together there now).
   function selectItem(item: MenuItem) {
-    const closing = selectedItemId === item.item_id;
-    setSelectedItemId(closing ? null : item.item_id);
-    if (!closing && !item.description && item.status !== 'failed' && !sendingChat) {
-      void handleAskAbout(item);
-    }
+    setSelectedItemId((id) => (id === item.item_id ? null : item.item_id));
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {
