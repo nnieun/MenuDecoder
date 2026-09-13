@@ -319,6 +319,13 @@ class OpenAIProvider:
         data_url = f'data:{mime};base64,{base64.b64encode(image).decode()}'
         response = self._call('parse',
             model=self.model, store=False, max_output_tokens=8000,
+            # Menu extraction is perception/formatting, not multi-step reasoning.
+            # Real A/B on a 13-item photo: default reasoning took 66s (3648
+            # reasoning tokens) for an exact 13; effort='low' took 17s and
+            # over-extracted by 1 (likely a dual-price parenthetical split
+            # into two items). Traded a little precision for ~4x latency -
+            # user's call, they were waiting 66s per photo.
+            reasoning={'effort': 'low'},
             instructions=EXTRACT_INSTRUCTIONS + EXTRACT_LOCATION_HINT,
             input=[{
                 'role': 'user',
