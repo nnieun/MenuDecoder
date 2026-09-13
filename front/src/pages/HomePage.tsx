@@ -1,18 +1,23 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { setPhoto } from '../features/upload';
 
 export default function HomePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    sessionStorage.setItem('preview_url', url);
-    sessionStorage.setItem('preview_name', file.name);
-    navigate('/upload');
+    try {
+      setPhoto(file);
+      navigate('/upload');
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   return (
@@ -80,6 +85,12 @@ export default function HomePage() {
 
         {/* CTA buttons */}
         <div className="flex flex-col gap-3 mt-auto">
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2">
+              <span className="text-red-500 text-sm shrink-0 mt-0.5">⚠️</span>
+              <p className="text-sm text-red-600">{error}</p>
+            </div>
+          )}
           <button
             onClick={() => cameraInputRef.current?.click()}
             className="w-full bg-orange-500 text-white font-bold py-4 rounded-2xl text-base active:bg-orange-600 transition-colors flex items-center justify-center gap-2 shadow-md shadow-orange-200"

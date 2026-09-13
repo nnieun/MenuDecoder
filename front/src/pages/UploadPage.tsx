@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getPhoto, setPhoto, clearPhoto, transformPhoto } from '../features/upload';
+import { api, newKey, ApiError } from '../api/client';
 
 type Rotation = 0 | 90 | 180 | 270;
 
@@ -7,24 +9,32 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState('');
+  const [crop, setCrop] = useState([0, 0, 100, 100]);
+  const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
   const [rotation, setRotation] = useState<Rotation>(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const url = sessionStorage.getItem('preview_url');
-    const name = sessionStorage.getItem('preview_name') ?? '';
-    if (!url) {
+    const { file, url } = getPhoto();
+    if (!file || !url) {
       navigate('/', { replace: true });
       return;
     }
     setPreviewUrl(url);
-    setFilename(name);
-    return () => {
-      // cleanup is deferred to navigation
-    };
+    setFilename(file.name);
   }, [navigate]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    let stopped = false;
+    let url: string | null = null;
+    transformPhoto(rotation, crop).then(blob => {
+      if (!stopped) { url = URL.createObjectURL(blob); setCroppedUrl(url); }
+    }).catch(err => { if (!stopped) setError((err as Error).message); });
+    return () => { stopped = true; if (url) URL.revokeObjectURL(url); };
+  }, [previewUrl, rotation, crop]);
 
   function rotate() {
     setRotation((r) => ((r + 90) % 360) as Rotation);
@@ -32,40 +42,34 @@ export default function UploadPage() {
 
   function handleReselect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setError(null);
-    if (file.size > 3 * 1024 * 1024) {
-      setError('파일 크기가 3MB를 초과해요. 더 작은 사진을 선택해 주세요.');
-      return;
+    try {
+      const url = setPhoto(file);
+      setPreviewUrl(url);
+      setFilename(file.name);
+      setRotation(0); setCrop([0, 0, 100, 100]);
+    } catch (err) {
+      setError((err as Error).message);
     }
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      setError('JPEG 또는 PNG 파일만 지원해요.');
-      return;
-    }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const url = URL.createObjectURL(file);
-    sessionStorage.setItem('preview_url', url);
-    sessionStorage.setItem('preview_name', file.name);
-    setPreviewUrl(url);
-    setFilename(file.name);
-    setRotation(0);
   }
 
-  function handleAnalyze() {
+  async function handleAnalyze() {
+    if (submitting) return;
     setSubmitting(true);
-    // Mock: navigate to analysis page after short delay
-    setTimeout(() => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      sessionStorage.removeItem('preview_url');
-      sessionStorage.removeItem('preview_name');
-      navigate('/analyses/mock-001', { replace: true });
-    }, 800);
+    setError(null);
+    try {
+      const blob = await transformPhoto(rotation, crop);
+      const accepted = await api.create(blob, newKey());
+      clearPhoto();
+      navigate(`/analyses/${accepted.analysis_id}`, { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : (err as Error).message);
+      setSubmitting(false);
+    }
   }
 
-  const rotateStyle: React.CSSProperties = {
-    transform: `rotate(${rotation}deg)`,
-    transition: 'transform 0.3s ease',
-  };
 
   return (
     <div className="mobile-container flex flex-col min-h-screen">
@@ -89,14 +93,14 @@ export default function UploadPage() {
              style={{ minHeight: 240 }}>
           {previewUrl && (
             <img
-              src={previewUrl}
+              src={croppedUrl || previewUrl}
               alt="업로드할 메뉴판 미리보기"
               className="max-w-full max-h-80 object-contain"
-              style={rotateStyle}
             />
           )}
           {/* Rotate button */}
           <button
+            disabled={submitting}
             onClick={rotate}
             className="absolute bottom-3 right-3 bg-white rounded-full shadow-md w-10 h-10 flex items-center justify-center active:bg-gray-50"
             aria-label="사진 회전"
@@ -108,6 +112,16 @@ export default function UploadPage() {
           </button>
         </div>
 
+        <fieldset disabled={submitting} className="bg-gray-50 rounded-xl p-4">
+          <legend className="text-sm font-semibold">분석할 영역 선택</legend>
+          <p className="text-xs text-gray-500 mb-3">회전된 사진 기준으로 범위를 조절하세요. 위 미리보기 영역만 전송돼요.</p>
+          {['왼쪽', '위쪽', '오른쪽', '아래쪽'].map((label, index) => <label key={label} className="flex gap-2 items-center text-xs mb-2">
+            <span className="w-10">{label}</span>
+            <input type="range" aria-label={label + ' 영역'} min={index < 2 ? 0 : crop[index - 2] + 1} max={index < 2 ? crop[index + 2] - 1 : 100} value={crop[index]} onChange={e => setCrop(old => old.map((v, i) => index === i ? Number(e.target.value) : v))} className="flex-1" />
+            <span className="w-10">{crop[index]}%</span>
+          </label>)}
+          <button type="button" onClick={() => setCrop([0, 0, 100, 100])} className="text-xs text-orange-600 underline">전체 영역으로 초기화</button>
+        </fieldset>
         {/* Filename */}
         <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-3">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -116,6 +130,7 @@ export default function UploadPage() {
           </svg>
           <span className="text-sm text-gray-600 truncate flex-1">{filename || '선택된 파일'}</span>
           <button
+            disabled={submitting}
             onClick={() => fileInputRef.current?.click()}
             className="text-xs text-orange-500 font-semibold shrink-0"
           >
@@ -127,7 +142,7 @@ export default function UploadPage() {
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="text-red-500 text-sm shrink-0 mt-0.5">⚠️</span>
-            <p className="text-sm text-red-600">{error}</p>
+            <p role="alert" className="text-sm text-red-600">{error}</p>
           </div>
         )}
 

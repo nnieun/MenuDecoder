@@ -1,10 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { MOCK_ANALYSIS, STATUS_LABELS } from '../mocks/analysisData';
-import type { Analysis, MenuItem, ChatMessage } from '../types';
+import { STATUS_LABELS } from '../constants/statusLabels';
+import useAnalysis from '../hooks/useAnalysis';
+import useDialogFocus from '../hooks/useDialogFocus';
+import { api, newKey, clearSession, safeUrl, ApiError, type StrictAnalysis, type StrictItem, type StrictMessage } from '../api/client';
+
+type MenuItem = StrictItem;
+type DisplayStatus = StrictAnalysis['status'] | 'session_expired';
 
 // ─── Status Badge ────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: Analysis['status'] }) {
+function StatusBadge({ status }: { status: DisplayStatus }) {
   const isActive = ['queued', 'reading', 'searching_docs', 'searching_images', 'partial'].includes(status);
   const isError = status === 'failed' || status === 'rate_limited' || status === 'session_expired';
   const base = 'inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full';
@@ -25,10 +30,7 @@ function StatusBadge({ status }: { status: Analysis['status'] }) {
 
 // ─── Citations Panel ──────────────────────────────────────────────────────────
 function CitationsPanel({ item, onClose }: { item: MenuItem; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
+  const dialogRef = useDialogFocus(onClose);
 
   return (
     <div
@@ -55,44 +57,46 @@ function CitationsPanel({ item, onClose }: { item: MenuItem; onClose: () => void
         {item.citations.length > 0 && (
           <div className="mb-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">문서 출처</p>
-            {item.citations.map((c) => (
-              <div key={c.source_id} className="bg-gray-50 rounded-xl p-3 mb-2">
-                <p className="text-sm font-medium text-gray-800">{c.document_title}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{c.section_path}</p>
-                {c.source_url && (
-                  <a
-                    href={c.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-orange-500 mt-1 inline-block"
-                  >
-                    원본 보기 →
-                  </a>
-                )}
-              </div>
-            ))}
+            {item.citations.map((c) => {
+              const url = safeUrl(c.source_url);
+              return (
+                <div key={c.chunk_id} className="bg-gray-50 rounded-xl p-3 mb-2">
+                  <p className="text-sm font-medium text-gray-800">{c.document_title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {c.section_path}
+                    {c.printed_page_label ? ` · 인쇄 페이지 ${c.printed_page_label}` : ''}
+                    {c.pdf_page_index != null ? ` · PDF ${c.pdf_page_index + 1}쪽` : ''}
+                  </p>
+                  {url && (
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-500 mt-1 inline-block">
+                      원본 보기 →
+                    </a>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
         {item.images.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">사진 출처</p>
-            {item.images.map((img) => (
-              <div key={img.image_id} className="bg-gray-50 rounded-xl p-3 mb-2 flex items-center gap-3">
-                <img src={img.image_url} alt={img.caption} className="w-12 h-12 object-cover rounded-lg bg-gray-200" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-500 truncate">{img.caption}</p>
-                  <a
-                    href={img.source_page_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-orange-500"
-                  >
-                    원본 페이지 →
-                  </a>
+            {item.images.map((img) => {
+              const url = safeUrl(img.source_page_url);
+              return (
+                <div key={img.image_id} className="bg-gray-50 rounded-xl p-3 mb-2 flex items-center gap-3">
+                  <img src={img.image_url} alt={img.caption} className="w-12 h-12 object-cover rounded-lg bg-gray-200" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 truncate">{img.caption}</p>
+                    {url && (
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-500">
+                        원본 페이지 →
+                      </a>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -108,24 +112,28 @@ function CitationsPanel({ item, onClose }: { item: MenuItem; onClose: () => void
 }
 
 // ─── Edit Panel ───────────────────────────────────────────────────────────────
-function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => void; onSave: (id: string, name: string) => void }) {
+function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => void; onSave: (item: MenuItem, name: string) => Promise<void> }) {
   const [value, setValue] = useState(item.original_name);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useDialogFocus(onClose);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  function handleSave() {
+  async function handleSave() {
     if (!value.trim() || value === item.original_name) { onClose(); return; }
     setSaving(true);
-    setTimeout(() => {
-      onSave(item.item_id, value.trim());
+    setError('');
+    try {
+      await onSave(item, value.trim());
       onClose();
-    }, 600);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : (err as Error).message);
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="원문 수정">
+    <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="원문 수정">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-md mx-auto bg-white rounded-t-3xl px-5 pt-5 pb-10"
            onKeyDown={(e) => e.key === 'Escape' && onClose()}>
@@ -144,8 +152,9 @@ function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => v
           rows={3}
           aria-label="수정할 원문 입력"
         />
+        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
         <div className="flex gap-2 mt-3">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold text-sm">
             취소
           </button>
           <button
@@ -172,7 +181,8 @@ function MenuCard({
   onEdit: (item: MenuItem) => void;
 }) {
   const [imgError, setImgError] = useState(false);
-  const isSearching = (item.status as string) === 'searching_images';
+  useEffect(() => setImgError(false), [item.item_version, item.images[0]?.image_url]);
+  const isSearching = item.status === 'searching_images';
 
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
@@ -205,7 +215,7 @@ function MenuCard({
       <div className="px-4 py-4">
         {/* Names */}
         <div className="mb-1">
-          <h3 className="font-bold text-gray-900 text-base leading-snug">{item.translated_name}</h3>
+          <h3 className="font-bold text-gray-900 text-base leading-snug">{item.translated_name || item.original_name}</h3>
           <p className="text-xs text-gray-400 mt-0.5">{item.original_name}</p>
         </div>
 
@@ -227,13 +237,15 @@ function MenuCard({
         {/* Description */}
         {item.description ? (
           <p className="text-sm text-gray-700 leading-relaxed mb-3">{item.description}</p>
+        ) : item.status === 'failed' ? (
+          <p className="text-sm text-red-500 leading-relaxed mb-3">이 메뉴는 처리하지 못했어요. 원문 수정으로 다시 시도할 수 있어요.</p>
         ) : (
           <p className="text-sm text-gray-400 leading-relaxed mb-3 italic">설명을 불러오고 있어요...</p>
         )}
 
         {/* Warnings */}
-        {item.warnings.map((w) => (
-          <div key={w} className="flex items-start gap-1.5 mb-3 bg-yellow-50 rounded-lg px-3 py-2">
+        {item.warnings.map((w, i) => (
+          <div key={i} className="flex items-start gap-1.5 mb-3 bg-yellow-50 rounded-lg px-3 py-2">
             <span className="text-yellow-500 text-xs mt-0.5">⚠️</span>
             <span className="text-xs text-yellow-700">{w}</span>
           </div>
@@ -262,16 +274,20 @@ function MenuCard({
 }
 
 // ─── Delete Confirm ───────────────────────────────────────────────────────────
-function DeleteConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () => void; onConfirm: () => void; error: string; deleting: boolean }) {
+  const dialogRef = useDialogFocus(onCancel);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-5" role="dialog" aria-modal="true">
+    <div ref={dialogRef} tabIndex={-1} aria-label="분석 삭제 확인" className="fixed inset-0 z-50 flex items-center justify-center px-5" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
       <div className="relative bg-white rounded-2xl px-5 pt-6 pb-5 w-full max-w-sm shadow-xl">
         <h2 className="font-bold text-gray-900 text-base mb-2">분석을 삭제할까요?</h2>
         <p className="text-sm text-gray-500 mb-5">지금까지의 메뉴 분석과 대화가 모두 삭제돼요. 이 작업은 취소할 수 없어요.</p>
+        {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
         <div className="flex gap-2">
           <button onClick={onCancel} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold text-sm">취소</button>
-          <button onClick={onConfirm} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold text-sm">삭제</button>
+          <button onClick={onConfirm} disabled={deleting} className="flex-1 py-3 rounded-xl bg-red-500 disabled:bg-red-300 text-white font-semibold text-sm">
+            {deleting ? '삭제 중...' : '삭제'}
+          </button>
         </div>
       </div>
     </div>
@@ -282,95 +298,115 @@ function DeleteConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfir
 export default function AnalysisPage() {
   const { analysisId } = useParams();
   const navigate = useNavigate();
-  const [analysis, setAnalysis] = useState<Analysis>(MOCK_ANALYSIS);
-  const [citationItem, setCitationItem] = useState<MenuItem | null>(null);
+  const { analysis, accept, error, errorStatus, setError, refresh } = useAnalysis(analysisId ?? '');
+  const [citationItemId, setCitationItemId] = useState<string | null>(null);
+  const citationItem = citationItemId
+    ? analysis?.items.find((i) => i.item_id === citationItemId) ?? null
+    : null;
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [showDelete, setShowDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [chatError, setChatError] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Simulate partial → done progression
   useEffect(() => {
-    if (analysis.status === 'partial') {
-      const t = setTimeout(() => {
-        setAnalysis((a) => ({ ...a, status: 'done', remaining_work: false }));
-      }, 3000);
-      return () => clearTimeout(t);
-    }
-  }, [analysis.status]);
+    if (!analysisId) navigate('/', { replace: true });
+  }, [analysisId, navigate]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [analysis.messages.length]);
+  }, [analysis?.messages.length]);
 
-  function handleSendMessage() {
+  async function handleSendMessage() {
     const content = chatInput.trim();
-    if (!content || sendingChat) return;
-
-    const userMsg: ChatMessage = {
-      message_id: `msg-${Date.now()}`,
-      role: 'user',
-      content,
-      status: 'sending',
-      referenced_item_ids: [],
-      citations: [],
-    };
-    setAnalysis((a) => ({ ...a, messages: [...a.messages, userMsg] }));
-    setChatInput('');
+    if (!content || sendingChat || !analysisId) return;
     setSendingChat(true);
-
-    // Mock response
-    setTimeout(() => {
-      const assistantMsg: ChatMessage = {
-        message_id: `msg-${Date.now()}-res`,
-        role: 'assistant',
-        content: `"${content}"에 대해 답변드릴게요. 이 서비스는 현재 모의 모드로 동작 중이에요. 실제 백엔드 연동 후 정확한 답변을 드릴 수 있어요.`,
-        status: 'done',
-        referenced_item_ids: [],
-        citations: [],
-      };
-      setAnalysis((a) => ({
-        ...a,
-        messages: [
-          ...a.messages.map((m) => (m.message_id === userMsg.message_id ? { ...m, status: 'done' as const } : m)),
-          assistantMsg,
-        ],
-      }));
+    setChatError('');
+    try {
+      const updated = await api.message(analysisId, content, newKey());
+      accept(updated);
+      setChatInput('');
+      refresh();
+    } catch (err) {
+      setChatError(err instanceof ApiError ? err.message : (err as Error).message);
+    } finally {
       setSendingChat(false);
-    }, 1200);
-  }
-
-  function handleEditSave(itemId: string, newName: string) {
-    setAnalysis((a) => ({
-      ...a,
-      items: a.items.map((i) =>
-        i.item_id === itemId ? { ...i, original_name: newName, status: 'reanalyzing', item_version: i.item_version + 1 } : i
-      ),
-    }));
-    setTimeout(() => {
-      setAnalysis((a) => ({
-        ...a,
-        items: a.items.map((i) => (i.item_id === itemId && i.status === 'reanalyzing' ? { ...i, status: 'done' } : i)),
-      }));
-    }, 2000);
-  }
-
-  function handleDelete() {
-    setShowDelete(false);
-    sessionStorage.clear();
-    navigate('/', { replace: true });
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
     }
   }
 
-  const _ = analysisId; // used in URL
+  async function handleEditSave(item: MenuItem, newName: string) {
+    if (!analysisId) return;
+    try {
+      const updated = await api.edit(analysisId, item, newName, newKey());
+      accept(updated); refresh();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const latest = await api.get(analysisId); accept(latest);
+        const current = (latest.items ?? []).find(i => i.item_id === item.item_id);
+        if (current) setEditItem({ ...current, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
+      }
+      throw err;
+    }
+  }
+
+  async function handleDelete() {
+    if (!analysisId) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await api.delete(analysisId);
+      clearSession();
+      navigate('/', { replace: true });
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : (err as Error).message);
+      setDeleting(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void handleSendMessage();
+    }
+  }
+
+  if (!analysisId) return null;
+
+  if (!analysis) {
+    if (error) {
+      const isAccessError = errorStatus === 401 || errorStatus === 404;
+      return (
+        <div className="mobile-container flex flex-col min-h-screen items-center justify-center px-6 gap-4 text-center">
+          <span className="text-4xl">{isAccessError ? '⌛' : '⚠️'}</span>
+          <p className="text-sm text-gray-600">
+            {isAccessError ? '이용 중인 세션이 만료됐거나 이 분석에 접근할 수 없어요.' : error}
+          </p>
+          <div className="flex gap-2">
+            {!isAccessError && (
+              <button onClick={refresh} className="bg-gray-100 text-gray-700 font-semibold text-sm px-5 py-3 rounded-xl">
+                다시 시도
+              </button>
+            )}
+            <button onClick={() => navigate('/')} className="bg-orange-500 text-white font-semibold text-sm px-5 py-3 rounded-xl">
+              홈으로
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="mobile-container flex flex-col min-h-screen items-center justify-center gap-3">
+        <span className="w-8 h-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-400">분석 상태를 불러오고 있어요...</p>
+      </div>
+    );
+  }
+
+  const displayStatus: DisplayStatus = errorStatus === 401 || errorStatus === 404 ? 'session_expired' : analysis.status;
 
   return (
     <div className="mobile-container flex flex-col" style={{ height: '100dvh' }}>
@@ -386,7 +422,7 @@ export default function AnalysisPage() {
           </svg>
         </button>
         <div className="flex-1">
-          <StatusBadge status={analysis.status} />
+          <StatusBadge status={displayStatus} />
         </div>
         <button
           onClick={() => setShowDelete(true)}
@@ -399,21 +435,40 @@ export default function AnalysisPage() {
         </button>
       </header>
 
+      {error && <div role="alert" className="px-4 py-3 bg-red-50 text-sm text-red-700">
+        <p>{error}</p>
+        {errorStatus !== 401 && errorStatus !== 404 && <button onClick={refresh} className="underline mt-2">최신 상태 확인 후 계속하기</button>}
+      </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {/* Mock mode notice */}
-        <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
-          <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
-          <p className="text-xs text-blue-600">모의 모드 — 테스트용 예시 데이터입니다. 실제 분석 결과가 아니에요.</p>
-        </div>
+        {analysis.mode === 'mock' && (
+          <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
+            <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
+            <p className="text-xs text-blue-600">모의 모드 — 백엔드가 모의 AI 응답을 반환하고 있어요. 실제 분석 결과가 아니에요.</p>
+          </div>
+        )}
+
+        {analysis.warnings.length > 0 && (
+          <div className="mx-4 mt-3 mb-1 flex flex-col gap-2">
+            {analysis.warnings.map((w, i) => (
+              <div key={i} className="bg-yellow-50 border border-yellow-100 rounded-xl px-3 py-2 flex items-start gap-2">
+                <span className="text-yellow-500 text-xs mt-0.5">⚠️</span>
+                <p className="text-xs text-yellow-700">{w}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Menu cards */}
         <div className="flex flex-col gap-3 px-4 py-3">
+          {analysis.items.length === 0 && !analysis.remaining_work && (
+            <p className="text-sm text-gray-400 text-center py-10">인식된 메뉴가 없어요.</p>
+          )}
           {analysis.items.map((item) => (
             <MenuCard
               key={item.item_id}
               item={item}
-              onCitations={setCitationItem}
+              onCitations={(i) => setCitationItemId(i.item_id ?? null)}
               onEdit={setEditItem}
             />
           ))}
@@ -433,7 +488,7 @@ export default function AnalysisPage() {
               <span className="text-xs text-gray-400 shrink-0">대화</span>
               <div className="flex-1 h-px bg-gray-100" />
             </div>
-            {analysis.messages.map((msg) => (
+            {analysis.messages.map((msg: StrictMessage) => (
               <div key={msg.message_id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
                   <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-sm shrink-0 mr-2 mt-1">
@@ -448,8 +503,17 @@ export default function AnalysisPage() {
                   }`}
                 >
                   {msg.content}
+                  {msg.citations.length > 0 && <ul className="mt-2 text-xs space-y-1">
+                    {msg.citations.map(c => <li key={c.chunk_id}>
+                      <a href={safeUrl(c.source_url)} target="_blank" rel="noopener noreferrer" className="underline">{c.document_title}</a>
+                      <span> · {c.section_path}{c.pdf_page_index != null ? ` · PDF ${c.pdf_page_index + 1}쪽` : ''}</span>
+                    </li>)}
+                  </ul>}
                   {msg.status === 'sending' && (
                     <span className="ml-1 inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {msg.status === 'failed' && (
+                    <span className="ml-1 text-xs text-red-200">전송 실패</span>
                   )}
                 </div>
               </div>
@@ -464,6 +528,7 @@ export default function AnalysisPage() {
 
       {/* Chat input */}
       <div className="shrink-0 bg-white border-t border-gray-100 px-4 py-3 pb-safe">
+        {chatError && <p className="text-xs text-red-500 mb-2">{chatError}</p>}
         <div className="flex items-end gap-2 bg-gray-50 rounded-2xl px-3 py-2">
           <textarea
             ref={inputRef}
@@ -474,11 +539,11 @@ export default function AnalysisPage() {
             className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 resize-none outline-none max-h-28 min-h-[24px]"
             rows={1}
             aria-label="후속 질문 입력"
-            disabled={sendingChat}
+            disabled={sendingChat || analysis.remaining_work}
           />
           <button
             onClick={handleSendMessage}
-            disabled={!chatInput.trim() || sendingChat}
+            disabled={!chatInput.trim() || sendingChat || analysis.remaining_work}
             className="w-9 h-9 rounded-xl bg-orange-500 disabled:bg-gray-200 text-white flex items-center justify-center shrink-0 transition-colors"
             aria-label="질문 보내기"
           >
@@ -490,9 +555,16 @@ export default function AnalysisPage() {
       </div>
 
       {/* Panels */}
-      {citationItem && <CitationsPanel item={citationItem} onClose={() => setCitationItem(null)} />}
-      {editItem && <EditPanel item={editItem} onClose={() => setEditItem(null)} onSave={handleEditSave} />}
-      {showDelete && <DeleteConfirm onCancel={() => setShowDelete(false)} onConfirm={handleDelete} />}
+      {citationItem && <CitationsPanel item={citationItem} onClose={() => setCitationItemId(null)} />}
+      {editItem && <EditPanel item={editItem} onClose={() => { setEditItem(null); setError(''); }} onSave={handleEditSave} />}
+      {showDelete && (
+        <DeleteConfirm
+          error={deleteError}
+          deleting={deleting}
+          onCancel={() => { setShowDelete(false); setDeleteError(''); }}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   );
 }

@@ -19,5 +19,3 @@ __pycache__/
 .DS_Store
 .vscode/
 *.swp
-
-.docs/
