@@ -18,16 +18,19 @@ need its own broad try/except.
 """
 import base64
 import hashlib
+import ipaddress
+import logging
 from urllib.parse import urlparse
 
-import ipaddress
-from openai import OpenAI
+from langchain_core.tools import tool
+from openai import OpenAI, OpenAIError
 from pydantic import BaseModel
 
 from .models import ChatMessage, Citation, MenuImage, MenuItem
-from .rag.retriever import Retriever, default_retriever
 from .observability import Telemetry
-from langchain_core.tools import tool
+from .rag.retriever import Retriever, default_retriever
+
+logger = logging.getLogger(__name__)
 
 IMAGE_FETCH_TIMEOUT = 6.0
 MAX_IMAGE_CANDIDATES = 3
@@ -219,7 +222,7 @@ class OpenAIProvider:
     def __init__(self, settings, retriever: Retriever | None = None):
         self.settings = settings
         self.model = settings.openai_model
-        self.client = OpenAI(api_key=settings.openai_api_key, timeout=settings.request_timeout_seconds, max_retries=0)
+        self.client = OpenAI(api_key=settings.openai_api_key, timeout=settings.request_timeout_seconds, max_retries=settings.openai_max_retries)
         self._retriever = retriever
         self.telemetry = Telemetry(settings)
 
@@ -229,8 +232,8 @@ class OpenAIProvider:
             if self.settings.retrieval_mode == 'bm25':
                 self._retriever = default_retriever()
             else:
-                from .rag.vector import VectorRetriever
                 from .rag.stats import load_documents
+                from .rag.vector import VectorRetriever
                 self._retriever = VectorRetriever(load_documents(), self.settings, self.settings.chunk_size)
         return self._retriever
 
@@ -341,8 +344,16 @@ class OpenAIProvider:
             for candidate in candidates:
                 content.extend([{'type': 'input_text', 'text': f'ID: {candidate.image_id}; {candidate.caption}'},
                                 {'type': 'input_image', 'image_url': str(candidate.image_url), 'detail': 'low'}])
-            selected = self._call('parse', model=self.model, store=False, max_output_tokens=1000,
-                                                   input=[{'role': 'user', 'content': content}], text_format=ImageSelection).output_parsed
+            try:
+                selected = self._call('parse', model=self.model, store=False, max_output_tokens=1000,
+                                                       input=[{'role': 'user', 'content': content}], text_format=ImageSelection).output_parsed
+            except OpenAIError:
+                # A candidate's host can refuse OpenAI's server-side fetch (e.g. hotlink
+                # protection, 403/404) and fail the whole verification call. That is a bad
+                # candidate, not a reason to also throw away the description already saved
+                # on this item, so degrade to "no image" instead of propagating.
+                logger.warning('images(): candidate verification call failed for %r', item.original_name, exc_info=True)
+                selected = None
             ids = set(selected.selected_ids) if selected else set()
             item.images = [c for c in candidates if c.image_id in ids][:1]
         if not item.images:

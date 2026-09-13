@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     max_messages: int = 50
     max_provider_calls: int = 160
     global_provider_calls: int = 1000
-    request_timeout_seconds: float = 45
+    # Vision extraction with detail='high' on a real (non-tiny) photo can take
+    # well over 45s; a real upload timed out here in practice with the old
+    # default and max_retries=0, failing the whole analysis with zero items.
+    request_timeout_seconds: float = 90
+    openai_max_retries: int = 2
     data_dir: Path = Path('backend/data')
     chroma_host: str = ''
     chroma_port: int = 8000

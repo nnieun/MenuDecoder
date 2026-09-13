@@ -1,12 +1,15 @@
-from typing import TypedDict
+import logging
 from contextvars import ContextVar
-from .observability import Telemetry
+from typing import TypedDict
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
 
 from .models import ChatMessage
+from .observability import Telemetry
 from .store import DomainError
+
+logger = logging.getLogger(__name__)
 
 
 class StepState(TypedDict):
@@ -109,6 +112,11 @@ class Engine:
                 return
             raise
         except Exception:
+            logger.exception(
+                'step failed: analysis=%s stage=%s item=%s message=%s',
+                a.analysis_id, a.status, current_item.item_id if current_item else None,
+                current_message.message_id if current_message else None,
+            )
             if current_item:
                 current_item.status = 'failed'
                 current_item.warnings.append('외부 서비스 처리에 실패했어요. 원문 수정으로 재처리할 수 있어요.')

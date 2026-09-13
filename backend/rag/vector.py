@@ -52,7 +52,7 @@ class Embeddings:
                 raise ValueError('BGE input would be truncated')
             return self.local.encode(texts, normalize_embeddings=True).tolist()
         if self.client is None:
-            self.client = OpenAI(api_key=self.settings.openai_api_key, timeout=self.settings.request_timeout_seconds, max_retries=0)
+            self.client = OpenAI(api_key=self.settings.openai_api_key, timeout=self.settings.request_timeout_seconds, max_retries=self.settings.openai_max_retries)
         charge()
         response = self.client.embeddings.create(model=self.model, input=texts)
         self.last_usage = response.usage.model_dump()
