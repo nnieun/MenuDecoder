@@ -62,7 +62,8 @@ export const api = {
   },
   get: (id: string) => request<Analysis>(root(id), {}, id),
   advance: (id: string, version: number, key: string) => post<Analysis>(id, '/continue', { state_version: version }, key),
-  message: (id: string, content: string, _key: string) => retryableMutation(JSON.stringify([id, 'message', content]), key => post<Analysis>(id, '/messages', { content }, key)),
+  message: (id: string, content: string, _key: string, referencedItemIds: string[] = []) =>
+    retryableMutation(JSON.stringify([id, 'message', content, referencedItemIds]), key => post<Analysis>(id, '/messages', { content, referenced_item_ids: referencedItemIds }, key)),
   edit: (id: string, item: MenuItem, original_name: string, _key: string) => retryableMutation(JSON.stringify([id, item.item_id, item.item_version, original_name]), key => post<Analysis>(id, `/items/${item.item_id}`, { original_name, item_version: item.item_version }, key, 'PATCH')),
   delete: (id: string) => request<void>(root(id), { method: 'DELETE' }, id),
 };
@@ -80,14 +81,14 @@ export function advanceOnce(id: string, version: number) {
 }
 // Pydantic default_factory fields are optional in the generated OpenAPI schema even though
 // the server always sends them; normalize once so render code can treat arrays as required.
-export type StrictItem = Omit<MenuItem, 'citations' | 'images' | 'warnings'> & { citations: Citation[]; images: MenuImage[]; warnings: string[] };
+export type StrictItem = Omit<MenuItem, 'citations' | 'images' | 'warnings' | 'item_id'> & { citations: Citation[]; images: MenuImage[]; warnings: string[]; item_id: string };
 export type StrictMessage = Omit<ChatMessage, 'referenced_item_ids' | 'citations'> & { referenced_item_ids: string[]; citations: Citation[] };
 export type StrictAnalysis = Omit<Analysis, 'items' | 'messages' | 'warnings'> & { items: StrictItem[]; messages: StrictMessage[]; warnings: string[] };
 export function normalize(a: Analysis): StrictAnalysis {
   return {
     ...a,
     warnings: a.warnings ?? [],
-    items: (a.items ?? []).map(i => ({ ...i, citations: i.citations ?? [], images: i.images ?? [], warnings: i.warnings ?? [] })),
+    items: (a.items ?? []).map(i => ({ ...i, item_id: i.item_id!, citations: i.citations ?? [], images: i.images ?? [], warnings: i.warnings ?? [] })),
     messages: (a.messages ?? []).map(m => ({ ...m, referenced_item_ids: m.referenced_item_ids ?? [], citations: m.citations ?? [] })),
   };
 }

@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from .models import ChatMessage, Citation, MenuImage, MenuItem
 from .observability import Telemetry
 from .rag.retriever import Retriever, default_retriever
+from .targets import resolve_targets
 
 logger = logging.getLogger(__name__)
 
@@ -191,31 +192,6 @@ def image_candidates(response):
     return candidates[:MAX_IMAGE_CANDIDATES]
 
 
-def resolve_targets(analysis, message):
-    """Resolve explicit names first, then unambiguous conversational references."""
-    import re
-    import unicodedata
-    def normalize(value):
-        return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value).casefold())
-    valid = {item.item_id for item in analysis.items}
-    if message.referenced_item_ids:
-        return [item_id for item_id in message.referenced_item_ids if item_id in valid]
-    content = normalize(message.content)
-    matches = [item.item_id for item in analysis.items
-               if any(normalize(name) and normalize(name) in content
-                      for name in (item.original_name, item.translated_name))]
-    if matches:
-        return matches
-    if len(analysis.items) == 1:
-        return [analysis.items[0].item_id]
-    if any(word in content for word in ('그거', '그음식', '그메뉴', '그것', '아까', 'it', 'that')):
-        for previous in reversed(analysis.messages):
-            if previous.message_id == message.message_id or previous.status != 'done':
-                continue
-            targets = [item_id for item_id in previous.referenced_item_ids if item_id in valid]
-            if targets:
-                return targets if len(targets) == 1 else []
-    return []
 
 
 class OpenAIProvider:

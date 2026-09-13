@@ -176,14 +176,18 @@ function MenuCard({
   item,
   onCitations,
   onEdit,
+  onAsk,
+  asking,
 }: {
   item: MenuItem;
   onCitations: (item: MenuItem) => void;
   onEdit: (item: MenuItem) => void;
+  onAsk: (item: MenuItem) => void;
+  asking: boolean;
 }) {
   const [imgError, setImgError] = useState(false);
   useEffect(() => setImgError(false), [item.item_version, item.images[0]?.image_url]);
-  const isSearching = item.status === 'searching_images';
+  const isSearching = item.status === 'pending' || item.status === 'reanalyzing';
 
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
@@ -240,8 +244,21 @@ function MenuCard({
           <p className="text-sm text-gray-700 leading-relaxed mb-3">{item.description}</p>
         ) : item.status === 'failed' ? (
           <p className="text-sm text-red-500 leading-relaxed mb-3">이 메뉴는 처리하지 못했어요. 원문 수정으로 다시 시도할 수 있어요.</p>
+        ) : item.status === 'done' ? (
+          <button
+            onClick={() => onAsk(item)}
+            disabled={asking}
+            className="w-full text-left text-sm text-orange-600 bg-orange-50 disabled:opacity-60 rounded-lg px-3 py-2.5 mb-3 flex items-center gap-2"
+          >
+            {asking ? (
+              <span className="w-3.5 h-3.5 border border-orange-400 border-t-transparent rounded-full animate-spin inline-block shrink-0" />
+            ) : (
+              <span>💬</span>
+            )}
+            이 메뉴가 궁금하신가요? 탭해서 설명을 물어보세요
+          </button>
         ) : (
-          <p className="text-sm text-gray-400 leading-relaxed mb-3 italic">설명을 불러오고 있어요...</p>
+          <p className="text-sm text-gray-400 leading-relaxed mb-3 italic">메뉴를 확인하고 있어요...</p>
         )}
 
         {/* Warnings */}
@@ -359,13 +376,12 @@ export default function AnalysisPage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [analysis?.messages.length]);
 
-  async function handleSendMessage() {
-    const content = chatInput.trim();
+  async function sendMessage(content: string, referencedItemIds: string[] = []) {
     if (!content || sendingChat || !analysisId) return;
     setSendingChat(true);
     setChatError('');
     try {
-      const updated = await api.message(analysisId, content, newKey());
+      const updated = await api.message(analysisId, content, newKey(), referencedItemIds);
       accept(updated);
       setChatInput('');
       refresh();
@@ -374,6 +390,17 @@ export default function AnalysisPage() {
     } finally {
       setSendingChat(false);
     }
+  }
+
+  function handleSendMessage() {
+    return sendMessage(chatInput.trim());
+  }
+
+  // Menu cards no longer come with a description pre-filled (EX: lazy
+  // description) - tapping "설명 물어보기" is a shortcut for typing the same
+  // question, so it goes through the exact same chat path and citations.
+  function handleAskAbout(item: MenuItem) {
+    return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {
@@ -385,7 +412,7 @@ export default function AnalysisPage() {
       if (err instanceof ApiError && err.status === 409) {
         const latest = await api.get(analysisId); accept(latest);
         const current = (latest.items ?? []).find(i => i.item_id === item.item_id);
-        if (current) setEditItem({ ...current, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
+        if (current) setEditItem({ ...current, item_id: current.item_id!, citations: current.citations ?? [], images: current.images ?? [], warnings: current.warnings ?? [] });
       }
       throw err;
     }
@@ -510,6 +537,8 @@ export default function AnalysisPage() {
               item={item}
               onCitations={(i) => setCitationItemId(i.item_id ?? null)}
               onEdit={setEditItem}
+              onAsk={handleAskAbout}
+              asking={sendingChat}
             />
           ))}
           {analysis.remaining_work && (

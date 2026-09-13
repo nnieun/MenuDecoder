@@ -111,6 +111,29 @@ def test_partial_failure_preserves_success():
     assert 'secret' not in str(state)
 
 
+def test_description_generated_lazily_only_when_asked():
+    """Extraction + photo search run automatically; the full description is
+    deferred until a chat message actually asks about that item, per the
+    hybrid UX: scan names/prices/photos first, ask a waiter about specifics."""
+    _, client, path, auth, _ = setup()
+    state = finish(client, path, auth)
+    assert state['status'] == 'done'
+    assert all(item['status'] == 'done' for item in state['items'])
+    assert all(item['description'] == '' for item in state['items'])
+
+    item_id = state['items'][0]['item_id']
+    body = {'content': '이거 어떻게 조리해?', 'referenced_item_ids': [item_id]}
+    sent = client.post(path + '/messages', json=body, headers=auth | key())
+    assert sent.status_code == 202
+    state = finish(client, path, auth)
+    described = next(i for i in state['items'] if i['item_id'] == item_id)
+    assert described['description'] != ''
+    assert state['messages'][-1]['status'] == 'done'
+    # The other item was never asked about, so it stays undescribed.
+    other = next(i for i in state['items'] if i['item_id'] != item_id)
+    assert other['description'] == ''
+
+
 def test_delete_during_execution_cannot_resurrect():
     entered, release = Event(), Event()
     class Slow(MockProvider):

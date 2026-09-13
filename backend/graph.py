@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from .models import ChatMessage
 from .observability import Telemetry
 from .store import DomainError
+from .targets import resolve_targets
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,21 @@ class Engine:
             session = _active_session.get()
             self.step(session)
             return {'stage': session.analysis.status, 'version': session.analysis.state_version}
-        stages = ['reading', 'describing', 'images', 'answering', 'review']
+        stages = ['reading', 'images', 'describing', 'answering', 'review']
         def route(state):
             session = _active_session.get()
             analysis = session.analysis
             if analysis.status in ('queued', 'reading'):
                 return 'reading'
-            item = next((i for i in analysis.items if i.status in ('pending', 'reanalyzing', 'searching_docs', 'searching_images')), None)
+            item = next((i for i in analysis.items if i.status in ('pending', 'reanalyzing')), None)
             if item:
-                return 'images' if item.status == 'searching_images' else 'describing'
-            return 'answering' if any(m.status == 'sending' for m in analysis.messages) else 'review'
+                return 'images'
+            message = next((m for m in analysis.messages if m.role == 'user' and m.status == 'sending'), None)
+            if not message:
+                return 'review'
+            targets = resolve_targets(analysis, message)
+            needs_describe = any(i.item_id in targets and not i.description and i.status != 'failed' for i in analysis.items)
+            return 'describing' if needs_describe else 'answering'
         for stage in stages:
             builder.add_node(stage, advance)
             builder.add_edge(stage, END)
@@ -91,20 +97,25 @@ class Engine:
                     a.status, a.remaining_work = 'needs_review', False
                     return
             else:
-                current_item = next((i for i in a.items if i.status in ('pending', 'reanalyzing', 'searching_docs', 'searching_images')), None)
+                # Descriptions are no longer generated for every item up front - only
+                # extraction (name/price/translation) and the reference photo search run
+                # automatically. A full RAG description is generated lazily, the first
+                # time a chat message actually asks about that item - see resolve_targets.
+                current_item = next((i for i in a.items if i.status in ('pending', 'reanalyzing')), None)
                 if current_item:
-                    if current_item.status == 'searching_images':
-                        self.provider.images(current_item, charge)
-                        current_item.status = 'done'
-                    else:
-                        self.provider.describe(current_item, charge)
-                        current_item.status = 'searching_images'
+                    self.provider.images(current_item, charge)
+                    current_item.status = 'done'
                 else:
                     current_message = next((m for m in a.messages if m.role == 'user' and m.status == 'sending'), None)
                     if current_message:
-                        answer = self.provider.answer(a, current_message, charge)
-                        current_message.status = 'done'
-                        a.messages.append(answer)
+                        targets = resolve_targets(a, current_message)
+                        current_item = next((i for i in a.items if i.item_id in targets and not i.description and i.status != 'failed'), None)
+                        if current_item:
+                            self.provider.describe(current_item, charge)
+                        else:
+                            answer = self.provider.answer(a, current_message, charge)
+                            current_message.status = 'done'
+                            a.messages.append(answer)
         except DomainError as exc:
             if exc.status == 429:
                 a.status, a.remaining_work = 'rate_limited', False
@@ -127,9 +138,9 @@ class Engine:
                 a.status, a.remaining_work = 'failed', False
                 a.warnings.append('메뉴를 읽지 못했어요. API 설정이나 사진을 확인해 주세요.')
                 return
-        a.remaining_work = any(i.status in ('pending', 'reanalyzing', 'searching_docs', 'searching_images') for i in a.items) or any(m.status == 'sending' for m in a.messages)
+        a.remaining_work = any(i.status in ('pending', 'reanalyzing') for i in a.items) or any(m.status == 'sending' for m in a.messages)
         if a.remaining_work:
-            a.status = 'partial' if any(i.status == 'done' for i in a.items) else 'searching_docs'
+            a.status = 'partial' if any(i.status == 'done' for i in a.items) else 'searching_images'
         elif any(i.status == 'needs_review' for i in a.items):
             a.status = 'needs_review'
         else:
