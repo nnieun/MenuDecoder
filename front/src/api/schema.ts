@@ -358,6 +358,10 @@ export interface components {
             images?: components["schemas"]["MenuImage"][];
             /** Warnings */
             warnings?: string[];
+            /** Center X */
+            center_x?: number | null;
+            /** Center Y */
+            center_y?: number | null;
         };
         /** MessageRequest */
         MessageRequest: {

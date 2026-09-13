@@ -85,6 +85,12 @@ class ExtractedItem(BaseModel):
     original_name: str
     translated_name: str
     original_price_text: str | None = None
+    # Only meaningful when the model actually saw the photo (real vision
+    # extract()). backend/ocr.py's OCR-text-only structuring path leaves
+    # these null - there is no image for it to point at, and asking it to
+    # guess coordinates from text alone would just be invented data.
+    center_x: float | None = None
+    center_y: float | None = None
 
 
 class ExtractedMenu(BaseModel):
@@ -97,6 +103,14 @@ EXTRACT_INSTRUCTIONS = (
     'translated_name에는 자연스러운 한국어 음식명을 적으세요. '
     'original_price_text는 메뉴판에 적힌 가격 문자열을 그대로(통화 기호 포함) 옮기고, '
     '가격이 안 보이면 null로 두세요. 세금·옵션 가격을 추정해서 더하지 마세요.'
+)
+
+# Appended only for the real vision path (backend/ocr.py's OCR-text-only
+# structuring must not get this - see ExtractedItem.center_x/center_y).
+EXTRACT_LOCATION_HINT = (
+    ' 추가로 center_x, center_y에는 그 메뉴 이름 텍스트가 사진에서 대략 어디에 있는지 '
+    '0~1 사이의 비율로 적으세요 (0,0=왼쪽 위, 1,1=오른쪽 아래). 정확한 픽셀 좌표가 '
+    '아니라 대략적인 위치면 됩니다. 위치를 전혀 판단할 수 없으면 null로 두세요.'
 )
 
 
@@ -246,13 +260,13 @@ class OpenAIProvider:
     def extract(self, image: bytes, mime: str, charge) -> list[MenuItem]:
         charge()
         data_url = f'data:{mime};base64,{base64.b64encode(image).decode()}'
-        response = self._call('parse', 
+        response = self._call('parse',
             model=self.model, store=False, max_output_tokens=4000,
-            instructions=EXTRACT_INSTRUCTIONS,
+            instructions=EXTRACT_INSTRUCTIONS + EXTRACT_LOCATION_HINT,
             input=[{
                 'role': 'user',
                 'content': [
-                    {'type': 'input_text', 'text': '이 사진에서 메뉴 항목을 추출해 주세요.'},
+                    {'type': 'input_text', 'text': '이 사진에서 메뉴 항목과 각 항목의 대략적 위치를 추출해 주세요.'},
                     {'type': 'input_image', 'image_url': data_url, 'detail': 'high'},
                 ],
             }],
@@ -266,6 +280,8 @@ class OpenAIProvider:
                 original_name=i.original_name,
                 translated_name=i.translated_name,
                 original_price_text=i.original_price_text,
+                center_x=i.center_x,
+                center_y=i.center_y,
             )
             for i in parsed.items
         ]

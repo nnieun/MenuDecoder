@@ -53,6 +53,7 @@ def test_full_flow_contract_and_isolation():
     assert client.get(path, headers={'Authorization': 'Bearer wrong'}).status_code == 404
     state = finish(client, path, auth)
     assert state['status'] == 'done' and len(state['items']) == 2
+    assert all(0 <= i['center_x'] <= 1 and 0 <= i['center_y'] <= 1 for i in state['items'])
     request_key = key()
     body = {'content': '그 음식은 어떻게 조리해?'}
     sent = client.post(path + '/messages', json=body, headers=auth | request_key)

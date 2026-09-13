@@ -42,6 +42,13 @@ class MenuItem(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     images: list[MenuImage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    # Approximate location of this item's text in the uploaded photo, as a
+    # fraction of image width/height (0,0 = top-left, 1,1 = bottom-right).
+    # The vision model estimates this directly - it is not a precise
+    # bounding box and can be off by roughly one menu row. None when the
+    # provider didn't return one (mock mode, or the model omitted it).
+    center_x: float | None = Field(default=None, ge=0, le=1)
+    center_y: float | None = Field(default=None, ge=0, le=1)
 
 
 class ChatMessage(BaseModel):

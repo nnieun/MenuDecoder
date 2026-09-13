@@ -1502,6 +1502,32 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "center_x": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Center X"
+          },
+          "center_y": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Center Y"
           }
         },
         "type": "object",

@@ -174,12 +174,14 @@ function EditPanel({ item, onClose, onSave }: { item: MenuItem; onClose: () => v
 // ─── Menu Card ────────────────────────────────────────────────────────────────
 function MenuCard({
   item,
+  number,
   onCitations,
   onEdit,
   onAsk,
   asking,
 }: {
   item: MenuItem;
+  number: number;
   onCitations: (item: MenuItem) => void;
   onEdit: (item: MenuItem) => void;
   onAsk: (item: MenuItem) => void;
@@ -193,6 +195,14 @@ function MenuCard({
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
       {/* Image */}
       <div className="relative bg-gray-100 aspect-[4/3]">
+        {item.center_x != null && item.center_y != null && (
+          <span
+            className="absolute top-2 right-2 z-10 w-6 h-6 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow"
+            aria-label={`원본 사진의 ${number}번 위치`}
+          >
+            {number}
+          </span>
+        )}
         {isSearching && item.images.length === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <span className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
@@ -315,10 +325,22 @@ function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () 
 // ─── Original Photo ───────────────────────────────────────────────────────────
 // Server discards the uploaded photo after extraction, so this reads the client-
 // side copy (features/upload.ts) so users can eyeball the original Japanese text
-// against the recognized items themselves - no automatic position matching.
-function OriginalPhoto({ url }: { url: string }) {
+// against the recognized items themselves.
+//
+// center_x/center_y (when present) are the vision model's own rough guess at
+// where an item's text sits in the photo - not a precise, verified bounding
+// box (see docs/experiments). Pins can land a row off, so tapping one only
+// shows a small label rather than claiming an exact match; the number also
+// matches the badge on that item's card so a wrong pin position still points
+// the user to the right card.
+function OriginalPhoto({ url, items }: { url: string; items: MenuItem[] }) {
   const [expanded, setExpanded] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const pins = items
+    .map((item, index) => ({ item, number: index + 1 }))
+    .filter(({ item }) => item.center_x != null && item.center_y != null);
+  const active = pins.find(({ item }) => item.item_id === activePinId)?.item;
 
   return (
     <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
@@ -333,15 +355,40 @@ function OriginalPhoto({ url }: { url: string }) {
       {expanded && (
         <div className="border-t border-gray-100">
           <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
-            <img
-              src={url}
-              alt="업로드한 메뉴판 원본 사진. 인식된 이름·가격과 직접 대조해 보세요."
-              onClick={() => setZoomed((z) => !z)}
-              className={zoomed ? 'max-w-none cursor-zoom-out' : 'max-w-full object-contain cursor-zoom-in'}
-              style={zoomed ? undefined : { maxHeight: '60vh' }}
-            />
+            <div className="relative inline-block" onClick={() => setActivePinId(null)}>
+              <img
+                src={url}
+                alt="업로드한 메뉴판 원본 사진. 번호를 탭하면 메뉴 이름을 확인할 수 있어요."
+                onClick={(e) => { e.stopPropagation(); setZoomed((z) => !z); }}
+                className={zoomed ? 'max-w-none cursor-zoom-out block' : 'max-w-full cursor-zoom-in block'}
+                style={zoomed ? undefined : { maxHeight: '60vh' }}
+              />
+              {pins.map(({ item, number }) => (
+                <button
+                  key={item.item_id}
+                  onClick={(e) => { e.stopPropagation(); setActivePinId((id) => (id === item.item_id ? null : item.item_id)); }}
+                  className="absolute w-6 h-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow"
+                  style={{ left: `${(item.center_x ?? 0) * 100}%`, top: `${(item.center_y ?? 0) * 100}%` }}
+                  aria-label={`${number}번 ${item.translated_name || item.original_name} 대략적 위치`}
+                >
+                  {number}
+                </button>
+              ))}
+              {active && (
+                <div
+                  className="absolute z-10 bg-black/80 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap pointer-events-none"
+                  style={{ left: `${(active.center_x ?? 0) * 100}%`, top: `${(active.center_y ?? 0) * 100}%`, transform: 'translate(-50%, calc(-100% - 16px))' }}
+                >
+                  <p className="font-semibold">{active.translated_name || active.original_name}</p>
+                  {active.original_price_text && <p className="opacity-80">{active.original_price_text}</p>}
+                </div>
+              )}
+            </div>
           </div>
-          <p className="text-[11px] text-gray-400 px-3 py-1.5">사진을 탭하면 확대/축소돼요.</p>
+          <p className="text-[11px] text-gray-400 px-3 py-1.5">
+            {pins.length > 0 ? '번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여줘요. ' : ''}
+            사진을 탭하면 확대/축소돼요.
+          </p>
         </div>
       )}
     </div>
@@ -507,7 +554,7 @@ export default function AnalysisPage() {
       </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {photoUrl && <OriginalPhoto url={photoUrl} />}
+        {photoUrl && <OriginalPhoto url={photoUrl} items={analysis.items} />}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
@@ -531,10 +578,11 @@ export default function AnalysisPage() {
           {analysis.items.length === 0 && !analysis.remaining_work && (
             <p className="text-sm text-gray-400 text-center py-10">인식된 메뉴가 없어요.</p>
           )}
-          {analysis.items.map((item) => (
+          {analysis.items.map((item, index) => (
             <MenuCard
               key={item.item_id}
               item={item}
+              number={index + 1}
               onCitations={(i) => setCitationItemId(i.item_id ?? null)}
               onEdit={setEditItem}
               onAsk={handleAskAbout}
