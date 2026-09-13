@@ -326,21 +326,9 @@ function DeleteConfirm({ onCancel, onConfirm, error, deleting }: { onCancel: () 
 // Server discards the uploaded photo after extraction, so this reads the client-
 // side copy (features/upload.ts) so users can eyeball the original Japanese text
 // against the recognized items themselves.
-//
-// center_x/center_y (when present) are the vision model's own rough guess at
-// where an item's text sits in the photo - not a precise, verified bounding
-// box (see docs/experiments). Pins can land a row off, so tapping one only
-// shows a small label rather than claiming an exact match; the number also
-// matches the badge on that item's card so a wrong pin position still points
-// the user to the right card.
-function OriginalPhoto({ url, items }: { url: string; items: MenuItem[] }) {
+function OriginalPhoto({ url }: { url: string }) {
   const [expanded, setExpanded] = useState(false);
   const [zoomed, setZoomed] = useState(false);
-  const [activePinId, setActivePinId] = useState<string | null>(null);
-  const pins = items
-    .map((item, index) => ({ item, number: index + 1 }))
-    .filter(({ item }) => item.center_x != null && item.center_y != null);
-  const active = pins.find(({ item }) => item.item_id === activePinId)?.item;
 
   return (
     <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
@@ -355,10 +343,60 @@ function OriginalPhoto({ url, items }: { url: string; items: MenuItem[] }) {
       {expanded && (
         <div className="border-t border-gray-100">
           <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
+            <img
+              src={url}
+              alt="업로드한 메뉴판 원본 사진"
+              onClick={() => setZoomed((z) => !z)}
+              className={zoomed ? 'max-w-none cursor-zoom-out block' : 'max-w-full cursor-zoom-in block'}
+              style={zoomed ? undefined : { maxHeight: '60vh' }}
+            />
+          </div>
+          <p className="text-[11px] text-gray-400 px-3 py-1.5">사진을 탭하면 확대/축소돼요.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Translated Photo ─────────────────────────────────────────────────────────
+// Separate from OriginalPhoto: this overlays the numbered location pins on
+// the same photo, so "그냥 원본 보기" and "번역 위치 확인하기" stay two
+// distinct, independently collapsible actions instead of one crowded panel.
+//
+// center_x/center_y (when present) are the vision model's own rough guess at
+// where an item's text sits in the photo - not a precise, verified bounding
+// box (see docs/experiments). Pins can land a row off, so tapping one only
+// shows a small label rather than claiming an exact match; the number also
+// matches the badge on that item's card so a wrong pin position still points
+// the user to the right card.
+function TranslatedPhoto({ url, items }: { url: string; items: MenuItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const pins = items
+    .map((item, index) => ({ item, number: index + 1 }))
+    .filter(({ item }) => item.center_x != null && item.center_y != null);
+  const active = pins.find(({ item }) => item.item_id === activePinId)?.item;
+
+  if (pins.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold text-gray-600"
+        aria-expanded={expanded}
+      >
+        <span>🈂️ 번역된 사진 보기</span>
+        <span className="text-gray-400">{expanded ? '접기 ▲' : '펼치기 ▼'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100">
+          <div className={zoomed ? 'overflow-auto' : 'flex justify-center'} style={{ maxHeight: '60vh' }}>
             <div className="relative inline-block" onClick={() => setActivePinId(null)}>
               <img
                 src={url}
-                alt="업로드한 메뉴판 원본 사진. 번호를 탭하면 메뉴 이름을 확인할 수 있어요."
+                alt="메뉴판 사진. 번호를 탭하면 그 자리의 메뉴 이름을 한국어로 확인할 수 있어요."
                 onClick={(e) => { e.stopPropagation(); setZoomed((z) => !z); }}
                 className={zoomed ? 'max-w-none cursor-zoom-out block' : 'max-w-full cursor-zoom-in block'}
                 style={zoomed ? undefined : { maxHeight: '60vh' }}
@@ -386,8 +424,7 @@ function OriginalPhoto({ url, items }: { url: string; items: MenuItem[] }) {
             </div>
           </div>
           <p className="text-[11px] text-gray-400 px-3 py-1.5">
-            {pins.length > 0 ? '번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여줘요. ' : ''}
-            사진을 탭하면 확대/축소돼요.
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여줘요.
           </p>
         </div>
       )}
@@ -414,6 +451,7 @@ export default function AnalysisPage() {
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [photoUrl] = useState(() => (analysisId ? getPhotoForAnalysis(analysisId) : null));
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!analysisId) navigate('/', { replace: true });
@@ -554,7 +592,8 @@ export default function AnalysisPage() {
       </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {photoUrl && <OriginalPhoto url={photoUrl} items={analysis.items} />}
+        {photoUrl && <OriginalPhoto url={photoUrl} />}
+        {photoUrl && <TranslatedPhoto url={photoUrl} items={analysis.items} />}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>
@@ -573,21 +612,49 @@ export default function AnalysisPage() {
           </div>
         )}
 
-        {/* Menu cards */}
+        {/* Menu chips: tap a recognized name to open just that card (accordion) */}
+        {analysis.items.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pt-3">
+            {analysis.items.map((item, index) => {
+              const isOpen = selectedItemId === item.item_id;
+              return (
+                <button
+                  key={item.item_id}
+                  onClick={() => setSelectedItemId((id) => (id === item.item_id ? null : item.item_id))}
+                  className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-full border transition-colors ${
+                    isOpen ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-gray-200 text-gray-700'
+                  }`}
+                  aria-pressed={isOpen}
+                >
+                  <span className={`w-4 h-4 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${
+                    isOpen ? 'bg-white/25 text-white' : 'bg-orange-50 text-orange-600'
+                  }`}>{index + 1}</span>
+                  {item.translated_name || item.original_name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex flex-col gap-3 px-4 py-3">
           {analysis.items.length === 0 && !analysis.remaining_work && (
             <p className="text-sm text-gray-400 text-center py-10">인식된 메뉴가 없어요.</p>
           )}
+          {analysis.items.length > 0 && !selectedItemId && (
+            <p className="text-sm text-gray-400 text-center py-6">위에서 궁금한 메뉴를 탭해 보세요.</p>
+          )}
           {analysis.items.map((item, index) => (
-            <MenuCard
-              key={item.item_id}
-              item={item}
-              number={index + 1}
-              onCitations={(i) => setCitationItemId(i.item_id ?? null)}
-              onEdit={setEditItem}
-              onAsk={handleAskAbout}
-              asking={sendingChat}
-            />
+            selectedItemId === item.item_id && (
+              <MenuCard
+                key={item.item_id}
+                item={item}
+                number={index + 1}
+                onCitations={(i) => setCitationItemId(i.item_id ?? null)}
+                onEdit={setEditItem}
+                onAsk={handleAskAbout}
+                asking={sendingChat}
+              />
+            )
           ))}
           {analysis.remaining_work && (
             <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-400">
