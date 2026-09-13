@@ -428,7 +428,7 @@ function TranslatedPhoto({ url, items, onSelect }: { url: string; items: MenuIte
             </div>
           </div>
           <p className="text-[11px] text-gray-400 px-3 py-1.5">
-            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름과 함께 아래 카드에서 상세 설명을 불러와요.
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴 카드를 열어요.
           </p>
         </div>
       )}
@@ -492,15 +492,13 @@ export default function AnalysisPage() {
     return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
   }
 
-  // Tapping a chip or a photo pin does both at once: open that item's card
-  // AND fetch its description immediately, instead of requiring a second tap
-  // on the "궁금하신가요?" button inside the card.
+  // Just opens/closes that item's card - it does NOT fetch a description.
+  // Tried auto-fetching on every tap (see git history) but browsing several
+  // chips quickly to peek at the card layout fired a real paid call each
+  // time; the explicit "궁금하신가요?" button inside the card is the only
+  // thing that should trigger describe().
   function selectItem(item: MenuItem) {
-    const closing = selectedItemId === item.item_id;
-    setSelectedItemId(closing ? null : item.item_id);
-    if (!closing && !item.description && item.status !== 'failed' && !sendingChat) {
-      void handleAskAbout(item);
-    }
+    setSelectedItemId((id) => (id === item.item_id ? null : item.item_id));
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {
