@@ -1,4 +1,5 @@
-from .models import MenuItem, ChatMessage
+from .models import ChatMessage, MenuItem
+from .targets import NO_IMAGE_FOUND_WARNING
 
 
 class MockProvider:
@@ -14,7 +15,7 @@ class MockProvider:
         item.warnings = ['실제 조리법과 재료는 확인되지 않았어요.']
 
     def images(self, item, charge):
-        item.warnings.append('참고 사진을 찾지 못했어요.')
+        item.warnings.append(NO_IMAGE_FOUND_WARNING)
 
     def answer(self, analysis, message, charge):
         if not message.referenced_item_ids and len(analysis.items) > 1:

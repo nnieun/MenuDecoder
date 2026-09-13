@@ -101,6 +101,9 @@ def test_continue_after_completion_is_a_no_op():
 
 
 def test_partial_failure_preserves_success():
+    # images() only runs on demand now (see test_description_and_images_...),
+    # so trigger it for both items via a chat message referencing both, with
+    # one of them wired to fail.
     class Broken(MockProvider):
         def images(self, item, charge):
             if item.original_name == '焼き鳥':
@@ -108,19 +111,25 @@ def test_partial_failure_preserves_success():
             return super().images(item, charge)
     _, client, path, auth, _ = setup(Broken())
     state = finish(client, path, auth)
+    item_ids = [i['item_id'] for i in state['items']]
+    body = {'content': '둘 다 어떻게 조리해?', 'referenced_item_ids': item_ids}
+    client.post(path + '/messages', json=body, headers=auth | key())
+    state = finish(client, path, auth)
     assert [i['status'] for i in state['items']] == ['done', 'failed']
     assert 'secret' not in str(state)
 
 
-def test_description_generated_lazily_only_when_asked():
-    """Extraction + photo search run automatically; the full description is
-    deferred until a chat message actually asks about that item, per the
-    hybrid UX: scan names/prices/photos first, ask a waiter about specifics."""
+def test_description_and_images_generated_lazily_only_when_asked():
+    """Extraction alone (name/translation/price) runs automatically; both the
+    full description and the reference photo search are deferred until a chat
+    message actually asks about that item - hybrid UX: scan the chip list
+    first, ask about specifics only for what you're curious about."""
     _, client, path, auth, _ = setup()
     state = finish(client, path, auth)
     assert state['status'] == 'done'
     assert all(item['status'] == 'done' for item in state['items'])
     assert all(item['description'] == '' for item in state['items'])
+    assert all(item['images'] == [] for item in state['items'])
 
     item_id = state['items'][0]['item_id']
     body = {'content': '이거 어떻게 조리해?', 'referenced_item_ids': [item_id]}
@@ -129,10 +138,14 @@ def test_description_generated_lazily_only_when_asked():
     state = finish(client, path, auth)
     described = next(i for i in state['items'] if i['item_id'] == item_id)
     assert described['description'] != ''
+    # MockProvider.images() always reports "not found" but it must have run.
+    assert '참고 사진을 찾지 못했어요.' in described['warnings']
     assert state['messages'][-1]['status'] == 'done'
-    # The other item was never asked about, so it stays undescribed.
+    # The other item was never asked about, so it stays untouched.
     other = next(i for i in state['items'] if i['item_id'] != item_id)
     assert other['description'] == ''
+    assert other['images'] == []
+    assert other['warnings'] == []
 
 
 def test_delete_during_execution_cannot_resurrect():

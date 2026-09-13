@@ -8,6 +8,8 @@ import { api, newKey, clearSession, safeUrl, ApiError, type StrictAnalysis, type
 
 type MenuItem = StrictItem;
 type DisplayStatus = StrictAnalysis['status'] | 'session_expired';
+// Must match backend/targets.py's NO_IMAGE_FOUND_WARNING exactly.
+const NO_IMAGE_FOUND_WARNING = '참고 사진을 찾지 못했어요.';
 
 // ─── Status Badge ────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: DisplayStatus }) {
@@ -189,7 +191,10 @@ function MenuCard({
 }) {
   const [imgError, setImgError] = useState(false);
   useEffect(() => setImgError(false), [item.item_version, item.images[0]?.image_url]);
-  const isSearching = item.status === 'pending' || item.status === 'reanalyzing';
+  // Photo search is on-demand now (see backend/graph.py) - this card only
+  // ever renders while it's the one open (accordion), so "asking" in flight
+  // with no image and no "not found" warning yet means its fetch is running.
+  const isSearching = asking && item.images.length === 0 && !item.warnings.includes(NO_IMAGE_FOUND_WARNING) && item.status !== 'failed';
 
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
@@ -428,7 +433,7 @@ function TranslatedPhoto({ url, items, onSelect }: { url: string; items: MenuIte
             </div>
           </div>
           <p className="text-[11px] text-gray-400 px-3 py-1.5">
-            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴 카드를 열어요.
+            번호는 대략적인 위치예요(한 줄 정도 어긋날 수 있어요). 탭하면 이름을 보여주고 아래에서 그 메뉴의 사진·설명을 불러와요.
           </p>
         </div>
       )}
@@ -492,13 +497,19 @@ export default function AnalysisPage() {
     return sendMessage(`${item.translated_name || item.original_name} 설명해 주세요.`, [item.item_id]);
   }
 
-  // Just opens/closes that item's card - it does NOT fetch a description.
-  // Tried auto-fetching on every tap (see git history) but browsing several
-  // chips quickly to peek at the card layout fired a real paid call each
-  // time; the explicit "궁금하신가요?" button inside the card is the only
-  // thing that should trigger describe().
+  // Opens that item's card AND fetches its description + reference photo in
+  // one tap. This was tried once before and reverted (see git history) over
+  // concern that browsing several chips to peek at card layout would fire a
+  // paid call each time - but the backend no longer auto-fetches photos for
+  // every item either (also on-demand now, see backend/graph.py), so a tap
+  // is the one deliberate "I want this one" action rather than a side effect
+  // of casual browsing. Re-tapping an open chip just closes it, no re-fetch.
   function selectItem(item: MenuItem) {
-    setSelectedItemId((id) => (id === item.item_id ? null : item.item_id));
+    const closing = selectedItemId === item.item_id;
+    setSelectedItemId(closing ? null : item.item_id);
+    if (!closing && !item.description && item.status !== 'failed' && !sendingChat) {
+      void handleAskAbout(item);
+    }
   }
 
   async function handleEditSave(item: MenuItem, newName: string) {

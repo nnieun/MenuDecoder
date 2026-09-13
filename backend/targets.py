@@ -1,11 +1,21 @@
 """Resolve which menu item(s) a chat message is about.
 
 Moved out of provider.py so graph.py (provider-agnostic) can use it to
-decide, before generating a reply, whether an item still needs describe()
-run on it - without importing a concrete provider module.
+decide, before generating a reply, whether an item still needs describe()/
+images() run on it - without importing a concrete provider module.
 """
 import re
 import unicodedata
+
+# Shared between backend/provider.py, backend/mock.py (both append this exact
+# warning when images() found nothing) and graph.py (checks for it below to
+# tell "never tried" apart from "tried, found nothing" - images stays [] in
+# both cases, so the list alone can't distinguish them).
+NO_IMAGE_FOUND_WARNING = '참고 사진을 찾지 못했어요.'
+
+
+def needs_images(item) -> bool:
+    return not item.images and NO_IMAGE_FOUND_WARNING not in item.warnings
 
 
 def _normalize(value: str) -> str:

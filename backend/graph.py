@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from .models import ChatMessage
 from .observability import Telemetry
 from .store import DomainError
-from .targets import resolve_targets
+from .targets import needs_images, resolve_targets
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +32,24 @@ class Engine:
             session = _active_session.get()
             self.step(session)
             return {'stage': session.analysis.status, 'version': session.analysis.state_version}
-        stages = ['reading', 'images', 'describing', 'answering', 'review']
+        stages = ['reading', 'describing', 'images', 'answering', 'review']
         def route(state):
             session = _active_session.get()
             analysis = session.analysis
             if analysis.status in ('queued', 'reading'):
                 return 'reading'
-            item = next((i for i in analysis.items if i.status in ('pending', 'reanalyzing')), None)
-            if item:
-                return 'images'
+            if any(i.status in ('pending', 'reanalyzing') for i in analysis.items):
+                return 'reading'  # bookkeeping only now (no auto photo/description) - see step()
             message = next((m for m in analysis.messages if m.role == 'user' and m.status == 'sending'), None)
             if not message:
                 return 'review'
             targets = resolve_targets(analysis, message)
-            needs_describe = any(i.item_id in targets and not i.description and i.status != 'failed' for i in analysis.items)
-            return 'describing' if needs_describe else 'answering'
+            target_items = [i for i in analysis.items if i.item_id in targets and i.status != 'failed']
+            if any(not i.description for i in target_items):
+                return 'describing'
+            if any(needs_images(i) for i in target_items):
+                return 'images'
+            return 'answering'
         for stage in stages:
             builder.add_node(stage, advance)
             builder.add_edge(stage, END)
@@ -96,22 +99,37 @@ class Engine:
                 if not a.items:
                     a.status, a.remaining_work = 'needs_review', False
                     return
+                # Name/translation/price from extract() alone is enough to show
+                # the chip list - photo search and description are both fetched
+                # lazily now, only for an item a chat message actually asks
+                # about (see the target_items block below). This used to run
+                # images() automatically for every item right here, which for
+                # a 13-item menu meant 13 more sequential API calls before the
+                # analysis ever left "나머지 메뉴를 분석 중이에요" - see
+                # docs/experiments for the user-facing latency this caused.
+                for item in a.items:
+                    item.status = 'done'
+            elif any(i.status in ('pending', 'reanalyzing') for i in a.items):
+                # A post-edit re-analysis: same bookkeeping-only transition as
+                # above, no automatic describe()/images() call.
+                for item in a.items:
+                    if item.status in ('pending', 'reanalyzing'):
+                        item.status = 'done'
             else:
-                # Descriptions are no longer generated for every item up front - only
-                # extraction (name/price/translation) and the reference photo search run
-                # automatically. A full RAG description is generated lazily, the first
-                # time a chat message actually asks about that item - see resolve_targets.
-                current_item = next((i for i in a.items if i.status in ('pending', 'reanalyzing')), None)
-                if current_item:
-                    self.provider.images(current_item, charge)
-                    current_item.status = 'done'
-                else:
-                    current_message = next((m for m in a.messages if m.role == 'user' and m.status == 'sending'), None)
-                    if current_message:
-                        targets = resolve_targets(a, current_message)
-                        current_item = next((i for i in a.items if i.item_id in targets and not i.description and i.status != 'failed'), None)
+                current_message = next((m for m in a.messages if m.role == 'user' and m.status == 'sending'), None)
+                if current_message:
+                    targets = resolve_targets(a, current_message)
+                    target_items = [i for i in a.items if i.item_id in targets and i.status != 'failed']
+                    # describe() before images(): describe() replaces item.warnings
+                    # wholesale, so it must run first or it would wipe out the
+                    # "no image found" warning images() had just appended.
+                    current_item = next((i for i in target_items if not i.description), None)
+                    if current_item:
+                        self.provider.describe(current_item, charge)
+                    else:
+                        current_item = next((i for i in target_items if needs_images(i)), None)
                         if current_item:
-                            self.provider.describe(current_item, charge)
+                            self.provider.images(current_item, charge)
                         else:
                             answer = self.provider.answer(a, current_message, charge)
                             current_message.status = 'done'

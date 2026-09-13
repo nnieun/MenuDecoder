@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from .models import ChatMessage, Citation, MenuImage, MenuItem
 from .observability import Telemetry
 from .rag.retriever import Retriever, default_retriever
-from .targets import resolve_targets
+from .targets import NO_IMAGE_FOUND_WARNING, resolve_targets
 
 logger = logging.getLogger(__name__)
 
@@ -449,7 +449,7 @@ class OpenAIProvider:
             ids = set(selected.selected_ids) if selected else set()
             item.images = [c for c in candidates if c.image_id in ids][:1]
         if not item.images:
-            item.warnings.append('참고 사진을 찾지 못했어요.')
+            item.warnings.append(NO_IMAGE_FOUND_WARNING)
 
     def answer(self, analysis, message, charge) -> ChatMessage:
         target_ids = resolve_targets(analysis, message)
