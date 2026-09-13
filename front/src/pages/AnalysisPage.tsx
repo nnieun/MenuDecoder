@@ -605,8 +605,17 @@ export default function AnalysisPage() {
       </div>}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {photoUrl && <OriginalPhoto url={photoUrl} />}
-        {photoUrl && <TranslatedPhoto url={photoUrl} items={analysis.items} onSelect={selectItem} />}
+        {photoUrl ? (
+          <>
+            <OriginalPhoto url={photoUrl} />
+            <TranslatedPhoto url={photoUrl} items={analysis.items} onSelect={selectItem} />
+          </>
+        ) : (
+          <div className="mx-4 mt-3 mb-1 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 flex items-start gap-2">
+            <span className="text-gray-400 text-xs mt-0.5">📷</span>
+            <p className="text-xs text-gray-500">이 브라우저 세션에서 원본 사진을 찾을 수 없어요. 이 화면을 새로고침했거나 다른 탭에서 열었다면 사진이 사라질 수 있어요 - 분석 결과는 그대로 남아있어요.</p>
+          </div>
+        )}
         {analysis.mode === 'mock' && (
           <div className="mx-4 mt-3 mb-1 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-start gap-2">
             <span className="text-blue-400 text-xs mt-0.5">ℹ️</span>

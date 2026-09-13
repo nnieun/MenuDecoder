@@ -32,7 +32,8 @@ export async function transformPhoto(rotation: number, crop: number[]) {
 // Server discards the uploaded photo right after extraction (no re-fetch endpoint),
 // so the analysis screen keeps its own copy client-side for visual side-by-side
 // comparison. sessionStorage only - cleared with the tab, never sent anywhere.
-const photoKey = (analysisId: string) => `menu-decoder-photo:${analysisId}`;
+const PHOTO_KEY_PREFIX = 'menu-decoder-photo:';
+const photoKey = (analysisId: string) => PHOTO_KEY_PREFIX + analysisId;
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -41,9 +42,30 @@ function blobToDataUrl(blob: Blob) {
     reader.readAsDataURL(blob);
   });
 }
+// A ~3-4MB data URL per analysis adds up fast against sessionStorage's ~5-10MB
+// quota. Only one analysis is ever "active" in a tab, so drop every other
+// stored photo before saving a new one - otherwise setItem starts throwing
+// QuotaExceededError and (because the failure was swallowed silently) the
+// *next* analysis's photo just never appears, with no clue why.
+function clearOtherPhotos(exceptAnalysisId: string) {
+  try {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith(PHOTO_KEY_PREFIX) && key !== photoKey(exceptAnalysisId)) {
+        sessionStorage.removeItem(key);
+      }
+    }
+  } catch { /* ignore */ }
+}
 export async function savePhotoForAnalysis(analysisId: string, blob: Blob) {
-  try { sessionStorage.setItem(photoKey(analysisId), await blobToDataUrl(blob)); }
-  catch { /* best-effort only; the analysis itself doesn't depend on this */ }
+  clearOtherPhotos(analysisId);
+  try {
+    sessionStorage.setItem(photoKey(analysisId), await blobToDataUrl(blob));
+  } catch (err) {
+    // Best-effort only - the analysis itself doesn't depend on this - but
+    // still surface it somewhere instead of failing completely silently.
+    console.warn('사진을 세션에 저장하지 못했어요 (원본/번역 사진 패널이 안 보일 수 있어요):', err);
+  }
 }
 export function getPhotoForAnalysis(analysisId: string) {
   try { return sessionStorage.getItem(photoKey(analysisId)); } catch { return null; }
