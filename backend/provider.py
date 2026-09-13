@@ -37,6 +37,21 @@ IMAGE_FETCH_TIMEOUT = 6.0
 MAX_IMAGE_CANDIDATES = 3
 
 
+def _log_parse_failure(context: str, response) -> None:
+    """output_parsed is None gives no clue why. Log what the Responses API
+    actually said (status/incomplete_details/usage) instead of raising blind -
+    the previous 'model did not return structured output' error carried no
+    diagnostic info and took a second real API call to actually root-cause."""
+    try:
+        logger.error(
+            '%s: no structured output. status=%s incomplete_details=%s usage=%s output_types=%s',
+            context, response.status, response.incomplete_details, response.usage,
+            [item.type for item in (response.output or [])],
+        )
+    except Exception:
+        logger.exception('%s: no structured output, and failed to log response details', context)
+
+
 def _citation(chunk, document) -> Citation:
     return Citation(
         source_id=document.source_id,
@@ -261,7 +276,7 @@ class OpenAIProvider:
         charge()
         data_url = f'data:{mime};base64,{base64.b64encode(image).decode()}'
         response = self._call('parse',
-            model=self.model, store=False, max_output_tokens=4000,
+            model=self.model, store=False, max_output_tokens=8000,
             instructions=EXTRACT_INSTRUCTIONS + EXTRACT_LOCATION_HINT,
             input=[{
                 'role': 'user',
@@ -274,6 +289,7 @@ class OpenAIProvider:
         )
         parsed = response.output_parsed
         if parsed is None:
+            _log_parse_failure('extract', response)
             raise RuntimeError('extract: model did not return structured output')
         return [
             MenuItem(
@@ -307,6 +323,7 @@ class OpenAIProvider:
         )
         result = response.output_parsed
         if result is None:
+            _log_parse_failure('describe', response)
             raise RuntimeError('describe: model did not return structured output')
         item.translated_name = result.translated_name or item.translated_name
         item.description = result.description
@@ -383,6 +400,7 @@ class OpenAIProvider:
         )
         result = response.output_parsed
         if result is None:
+            _log_parse_failure('answer', response)
             raise RuntimeError('answer: model did not return structured output')
         citations = _citations_from(result.supporting_chunk_ids, chunks, self.retriever)
         content = result.content if citations else '확인 가능한 문서 근거가 없어 답변을 보류했어요.'
