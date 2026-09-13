@@ -321,11 +321,13 @@ class OpenAIProvider:
             model=self.model, store=False, max_output_tokens=8000,
             # Menu extraction is perception/formatting, not multi-step reasoning.
             # Real A/B on a 13-item photo: default reasoning took 66s (3648
-            # reasoning tokens) for an exact 13; effort='low' took 17s and
-            # over-extracted by 1 (likely a dual-price parenthetical split
-            # into two items). Traded a little precision for ~4x latency -
-            # user's call, they were waiting 66s per photo.
-            reasoning={'effort': 'low'},
+            # reasoning tokens). effort='low' and effort='minimal' were then
+            # re-compared head-to-head on the same real photo: 18.6s/15 items
+            # (low, 448 reasoning tokens) vs 17.6s/15 items (minimal, 0
+            # reasoning tokens) - identical item count and names, so 'low'
+            # was just spending extra reasoning tokens for no latency or
+            # accuracy benefit here. 'minimal' is the strictly better choice.
+            reasoning={'effort': 'minimal'},
             instructions=EXTRACT_INSTRUCTIONS + EXTRACT_LOCATION_HINT,
             input=[{
                 'role': 'user',
