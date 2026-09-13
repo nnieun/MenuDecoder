@@ -44,9 +44,15 @@ class PaddleExtractor:
             '(예: "味噌ラーメン　¥900"). original_name에는 가격·통화 기호를 제외한 '
             '음식명만 남기고, 가격 부분은 original_price_text로 분리하세요.'
         )
-        response = self.provider._call('parse', model=self.provider.model, store=False, max_output_tokens=4000,
+        # Only the recognized text goes to the model - polygon coordinates are
+        # irrelevant to structuring and, on a real photo with many lines, bloat
+        # the input enough that gpt-5-mini's reasoning + JSON output together
+        # blew past a 4000-token output budget and returned truncated (invalid)
+        # JSON. Dropping polygons and raising the budget both fixed it.
+        texts = [block['text'] for block in blocks]
+        response = self.provider._call('parse', model=self.provider.model, store=False, max_output_tokens=8000,
             instructions=ocr_instructions,
-            input=json.dumps(blocks, ensure_ascii=False), text_format=ExtractedMenu)
+            input=json.dumps(texts, ensure_ascii=False), text_format=ExtractedMenu)
         parsed = response.output_parsed
         if parsed is None:
             raise ValueError('OCR structuring failed')

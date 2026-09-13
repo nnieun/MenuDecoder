@@ -1,2 +1,4 @@
 data/
 .env
+# 사용자가 제공한 실제 메뉴판 사진. AGENTS.md: 사용자 사진은 커밋하지 않는다.
+rag/fixtures/
